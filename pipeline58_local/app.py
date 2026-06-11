@@ -7,6 +7,10 @@ from typing import Any, Dict
 import copy
 import math
 import json
+import os
+import re
+import urllib.error
+import urllib.request
 
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, Form, Header, HTTPException, Query, Request
@@ -4415,6 +4419,18 @@ def _pbpk_workbench_response() -> HTMLResponse:
     )
 
 
+@app.get("/static/be_agent.js", response_class=FileResponse)
+def be_agent_javascript() -> FileResponse:
+    asset_path = Path(__file__).resolve().parent / "static" / "be_agent.js"
+    if not asset_path.exists():
+        raise HTTPException(status_code=404, detail="BE agent asset not found")
+    return FileResponse(
+        asset_path,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard_home(
     request: Request,
@@ -5257,6 +5273,521 @@ def be_compare_run(
         return {"ok": True, "data": result, "error": None}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+BE_AGENT_GOALS = {
+    "match_reference",
+    "improve_f2",
+    "raise_cmax",
+    "lower_cmax",
+    "raise_auc",
+    "lower_auc",
+    "preserve_auc",
+    "preserve_cmax",
+    "reduce_variability",
+    "fast_dissolution",
+    "slow_release",
+}
+BE_AGENT_LOCKED_FIELDS = {
+    "smiles",
+    "salt_form",
+    "polymorph",
+    "pka_acid",
+    "pka_base",
+    "logp",
+    "tpsa",
+    "ppb",
+    "cl_total",
+    "api_supplier",
+}
+
+
+def _be_agent_number(source: Dict[str, Any], key: str, default: float | None = None) -> float | None:
+    value = source.get(key)
+    if value in (None, "", "auto", "Auto", "AUTO"):
+        return default
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _be_agent_keyword_intent(message: str) -> Dict[str, Any]:
+    text = str(message or "").strip().lower()
+    goals: list[str] = []
+
+    def has(*tokens: str) -> bool:
+        return any(token in text for token in tokens)
+
+    metric_positions = {
+        "cmax": [match.start() for match in re.finditer(r"c\s*max", text)],
+        "auc": [match.start() for match in re.finditer(r"auc", text)],
+    }
+    action_tokens = {
+        "raise": ("높", "올려", "증가", "提高", "增加", "上调", "raise", "increase"),
+        "lower": ("낮", "내려", "감소", "降低", "减少", "下调", "lower", "decrease"),
+        "preserve": ("유지", "그대로", "不变", "保持", "维持", "preserve", "keep"),
+    }
+    metric_actions: dict[str, set[str]] = {"cmax": set(), "auc": set()}
+    action_hits: list[tuple[str, int]] = []
+    for action, tokens in action_tokens.items():
+        for token in tokens:
+            action_hits.extend((action, match.start()) for match in re.finditer(re.escape(token), text))
+    ordered_metrics = sorted(
+        (position, metric)
+        for metric, positions in metric_positions.items()
+        for position in positions
+    )
+    for action, position in action_hits:
+        if not ordered_metrics:
+            break
+        if position < ordered_metrics[0][0]:
+            metric_actions[ordered_metrics[0][1]].add(action)
+            continue
+        if position > ordered_metrics[-1][0]:
+            metric_actions[ordered_metrics[-1][1]].add(action)
+            continue
+        for left, right in zip(ordered_metrics, ordered_metrics[1:]):
+            if left[0] <= position <= right[0]:
+                between = text[left[0]:position]
+                target = right[1] if re.search(r"[,，;；.。\n]", between) else left[1]
+                metric_actions[target].add(action)
+                break
+    present_metrics = [metric for metric, positions in metric_positions.items() if positions]
+    action_kinds = {action for action, _ in action_hits}
+    if len(present_metrics) == 2 and len(action_kinds) == 1:
+        for metric in present_metrics:
+            metric_actions[metric].update(action_kinds)
+    for metric, actions in metric_actions.items():
+        for action in ("raise", "lower", "preserve"):
+            if action in actions:
+                goals.append(f"{action}_{metric}")
+    if has("f2", "용출", "溶出", "dissolution", "release profile"):
+        goals.append("improve_f2")
+    if has("원약", "원연", "참조", "参比", "原研", "reference", "rld", "가깝", "接近"):
+        goals.append("match_reference")
+    if has("변동", "편차", "批间", "波动", "variability", "variation"):
+        goals.append("reduce_variability")
+    if has("빠른 용출", "빨리 녹", "快速溶出", "fast dissolution"):
+        goals.append("fast_dissolution")
+    if has("완만", "서방", "缓释", "控释", "slow release", "extended release"):
+        goals.append("slow_release")
+
+    intensity = "normal"
+    if has("조금", "약간", "소폭", "轻微", "小幅", "slightly", "gently"):
+        intensity = "cautious"
+    elif has("많이", "대폭", "강하게", "大幅", "明显", "strongly", "aggressive"):
+        intensity = "strong"
+
+    locked_requests = []
+    locked_terms = {
+        "smiles": ("smiles", "구조", "结构"),
+        "salt_form": ("염형", "盐型", "salt"),
+        "polymorph": ("결정형", "晶型", "polymorph"),
+        "pka_acid": ("pka",),
+        "logp": ("logp",),
+        "ppb": ("ppb", "단백결합", "蛋白结合"),
+        "cl_total": ("cl ", "clearance", "청소율", "清除率"),
+    }
+    for field, tokens in locked_terms.items():
+        if any(token in text for token in tokens):
+            locked_requests.append(field)
+    return {
+        "goals": list(dict.fromkeys(goal for goal in goals if goal in BE_AGENT_GOALS)),
+        "intensity": intensity,
+        "locked_requests": locked_requests,
+        "interpreter": "keyword",
+    }
+
+
+def _be_agent_ollama_intent(message: str, conversation: list[dict[str, Any]]) -> Dict[str, Any] | None:
+    model = os.environ.get("BE_AGENT_OLLAMA_MODEL", "qwen3.6:27b-q4_K_M").strip()
+    if not model:
+        return None
+    history = []
+    for row in conversation[-6:]:
+        if not isinstance(row, dict):
+            continue
+        role = str(row.get("role", "user"))
+        content = str(row.get("content", ""))[:800]
+        history.append(f"{role}: {content}")
+    prompt = f"""You classify a formulation-development request for a generic-drug BE workbench.
+Return JSON only. Never calculate or propose numeric values.
+Allowed goals: {sorted(BE_AGENT_GOALS)}
+Intensity must be cautious, normal, or strong.
+Set locked_requests when the user asks to alter API identity/intrinsic or measured fields such as SMILES, salt form, polymorph, pKa, logP, PPB, clearance, or API supplier.
+Use preserve_auc or preserve_cmax when the user explicitly wants that metric held stable.
+Conversation:
+{chr(10).join(history)}
+Latest user request: {message}
+JSON schema:
+{{"goals":["..."],"intensity":"normal","locked_requests":["..."],"summary_ko":"short Korean interpretation","summary_zh":"short Chinese interpretation"}}"""
+    body = json.dumps(
+        {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json",
+            "keep_alive": "15m",
+            "options": {"temperature": 0, "num_ctx": 2048, "num_predict": 160},
+            "think": False,
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        os.environ.get("BE_AGENT_OLLAMA_URL", "http://127.0.0.1:11434/api/generate"),
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            outer = json.loads(response.read().decode("utf-8"))
+        parsed = json.loads(str(outer.get("response", "{}")))
+        goals = [goal for goal in parsed.get("goals", []) if goal in BE_AGENT_GOALS]
+        intensity = str(parsed.get("intensity", "normal"))
+        if intensity not in {"cautious", "normal", "strong"}:
+            intensity = "normal"
+        locked = [str(field) for field in parsed.get("locked_requests", []) if str(field) in BE_AGENT_LOCKED_FIELDS]
+        return {
+            "goals": list(dict.fromkeys(goals)),
+            "intensity": intensity,
+            "locked_requests": locked,
+            "summary_ko": str(parsed.get("summary_ko", ""))[:300],
+            "summary_zh": str(parsed.get("summary_zh", ""))[:300],
+            "interpreter": f"ollama:{model}",
+        }
+    except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError, OSError):
+        return None
+
+
+def _be_agent_profile(text: Any) -> list[tuple[float, float]]:
+    rows: list[tuple[float, float]] = []
+    for raw in str(text or "").replace(";", "\n").splitlines():
+        parts = [part.strip() for part in raw.replace("\t", ",").split(",") if part.strip()]
+        if len(parts) < 2:
+            parts = raw.split()
+        if len(parts) < 2:
+            continue
+        try:
+            rows.append((float(parts[0]), max(0.0, min(100.0, float(parts[1])))))
+        except Exception:
+            continue
+    return sorted(rows)
+
+
+def _be_agent_blend_profile(test_text: Any, ref_text: Any, weight: float) -> str:
+    test_rows = _be_agent_profile(test_text)
+    ref_rows = _be_agent_profile(ref_text)
+    if not test_rows or not ref_rows:
+        return str(test_text or "")
+
+    def ref_value(target: float) -> float:
+        if target <= ref_rows[0][0]:
+            return ref_rows[0][1]
+        for left, right in zip(ref_rows, ref_rows[1:]):
+            if left[0] <= target <= right[0]:
+                span = max(right[0] - left[0], 1e-9)
+                return left[1] + (right[1] - left[1]) * ((target - left[0]) / span)
+        return ref_rows[-1][1]
+
+    return "\n".join(
+        f"{time:g},{max(0.0, min(100.0, value + (ref_value(time) - value) * weight)):.1f}"
+        for time, value in test_rows
+    )
+
+
+def _be_agent_build_patch(
+    request_payload: Dict[str, Any],
+    result_payload: Dict[str, Any],
+    intent: Dict[str, Any],
+) -> Dict[str, Any]:
+    reference = request_payload.get("reference") if isinstance(request_payload.get("reference"), dict) else {}
+    test = request_payload.get("test") if isinstance(request_payload.get("test"), dict) else {}
+    summary = result_payload.get("summary") if isinstance(result_payload.get("summary"), dict) else {}
+    goals = set(intent.get("goals", []))
+    intensity = str(intent.get("intensity", "normal"))
+    weight = {"cautious": 0.35, "normal": 0.58, "strong": 0.78}.get(intensity, 0.58)
+    changes: list[dict[str, Any]] = []
+    fields: Dict[str, Any] = {}
+    warnings: list[str] = []
+
+    def clamp(value: float, low: float, high: float) -> float:
+        return max(low, min(high, value))
+
+    def toward(current: float | None, target: float | None, amount: float = weight) -> float | None:
+        if current is None:
+            return target
+        if target is None:
+            return current
+        return current + (target - current) * amount
+
+    def bounded(current: float | None, candidate: float | None, low: float, high: float, max_fraction: float | None = None, max_delta: float | None = None) -> float | None:
+        if candidate is None:
+            return current
+        value = clamp(candidate, low, high)
+        if current is not None and max_fraction is not None:
+            value = clamp(value, current * (1.0 - max_fraction), current * (1.0 + max_fraction))
+        if current is not None and max_delta is not None:
+            value = clamp(value, current - max_delta, current + max_delta)
+        return clamp(value, low, high)
+
+    sol = _be_agent_number(test, "solubility_mg_ml")
+    d50 = _be_agent_number(test, "particle_size_um")
+    d30 = _be_agent_number(test, "dissolution_30min_pct")
+    compression = _be_agent_number(test, "compression_force_kn")
+    ref_sol = _be_agent_number(reference, "solubility_mg_ml")
+    ref_d50 = _be_agent_number(reference, "particle_size_um")
+    ref_d30 = _be_agent_number(reference, "dissolution_30min_pct")
+    ref_compression = _be_agent_number(reference, "compression_force_kn")
+    original = {"solubility_mg_ml": sol, "particle_size_um": d50, "dissolution_30min_pct": d30, "compression_force_kn": compression}
+
+    if goals & {"match_reference", "reduce_variability"}:
+        sol = toward(sol, ref_sol)
+        d50 = toward(d50, ref_d50)
+        d30 = toward(d30, ref_d30)
+        compression = toward(compression, ref_compression)
+    if goals & {"improve_f2", "fast_dissolution"}:
+        d30 = toward(d30, ref_d30, min(0.9, weight + 0.12))
+        d50 = toward(d50, ref_d50, weight)
+        compression = toward(compression, ref_compression, weight)
+    if "raise_cmax" in goals:
+        target_d50 = min(d50 or ref_d50 or 40.0, (ref_d50 or d50 or 40.0) * 0.9)
+        target_d30 = max(d30 or 70.0, min(98.0, (ref_d30 or d30 or 80.0) + 2.0))
+        d50 = toward(d50, target_d50)
+        d30 = toward(d30, target_d30)
+        compression = toward(compression, ref_compression or ((compression or 12.0) * 0.85))
+    if "lower_cmax" in goals:
+        target_d50 = max(d50 or ref_d50 or 40.0, (ref_d50 or d50 or 40.0) * 1.15)
+        target_d30 = min(d30 or 75.0, max(30.0, (ref_d30 or d30 or 75.0) - 8.0))
+        d50 = toward(d50, target_d50)
+        d30 = toward(d30, target_d30)
+        compression = toward(compression, ref_compression or ((compression or 12.0) * 1.15))
+    if "raise_auc" in goals and "preserve_auc" not in goals:
+        target_sol = max(sol or 0.001, ref_sol or 0.001, (sol or 0.001) * 1.2)
+        sol = toward(sol, target_sol)
+        d30 = toward(d30, ref_d30)
+    if "lower_auc" in goals and "preserve_auc" not in goals:
+        target_sol = min(sol or ref_sol or 0.1, ref_sol or (sol or 0.1) * 0.85)
+        sol = toward(sol, target_sol)
+        d30 = toward(d30, ref_d30)
+    if "preserve_auc" in goals:
+        sol = original["solubility_mg_ml"]
+        warnings.append("AUC 유지 요청에 따라 용해도 자동 변경을 제외했습니다.")
+    if "preserve_cmax" in goals:
+        d50 = original["particle_size_um"]
+        d30 = original["dissolution_30min_pct"]
+        compression = original["compression_force_kn"]
+        warnings.append("Cmax 유지 요청에 따라 D50, 30분 용출률, 압片力 자동 변경을 제외했습니다.")
+
+    fraction = {"cautious": 0.20, "normal": 0.35, "strong": 0.50}.get(intensity, 0.35)
+    d30_delta = {"cautious": 8.0, "normal": 15.0, "strong": 25.0}.get(intensity, 15.0)
+    sol = bounded(original["solubility_mg_ml"], sol, 0.001, 200.0, max_fraction=fraction)
+    d50 = bounded(original["particle_size_um"], d50, 1.0, 500.0, max_fraction=fraction)
+    d30 = bounded(original["dissolution_30min_pct"], d30, 5.0, 100.0, max_delta=d30_delta)
+    compression = bounded(original["compression_force_kn"], compression, 2.0, 40.0, max_fraction=fraction)
+
+    labels = {
+        "solubility_mg_ml": ("溶解度", "mg/mL"),
+        "particle_size_um": ("D50 粒径", "um"),
+        "dissolution_30min_pct": ("30min 溶出", "%"),
+        "compression_force_kn": ("压片力", "kN"),
+    }
+    candidates = {
+        "solubility_mg_ml": sol,
+        "particle_size_um": d50,
+        "dissolution_30min_pct": d30,
+        "compression_force_kn": compression,
+    }
+    for field, candidate in candidates.items():
+        current = original[field]
+        if candidate is None or current is None or abs(candidate - current) <= max(abs(current) * 0.002, 0.001):
+            continue
+        digits = 3 if field == "solubility_mg_ml" else 1
+        suggested = round(candidate, digits)
+        fields[field] = suggested
+        label, unit = labels[field]
+        changes.append(
+            {
+                "kind": "field",
+                "field": field,
+                "label": label,
+                "current": current,
+                "suggested": suggested,
+                "unit": unit,
+                "reason": "사용자 목표와 현재 Reference/Test 차이를 반영한 제한 범위 내 후보값입니다.",
+            }
+        )
+
+    if goals & {"improve_f2", "match_reference", "fast_dissolution", "raise_cmax", "lower_cmax"} and "preserve_cmax" not in goals:
+        profile_weight = min(0.85, weight + (0.08 if "improve_f2" in goals else 0.0))
+        profile = _be_agent_blend_profile(test.get("dissolution_profile"), reference.get("dissolution_profile"), profile_weight)
+        if profile and profile != str(test.get("dissolution_profile") or ""):
+            fields["dissolution_profile"] = profile
+            changes.append(
+                {
+                    "kind": "field",
+                    "field": "dissolution_profile",
+                    "label": "溶出曲线",
+                    "current": "当前 Test 曲线",
+                    "suggested": "向 Reference 分段收敛",
+                    "unit": "",
+                    "reason": "단일 30분 값만 바꾸지 않고 기존 Test 시간점을 Reference 방향으로 제한적으로 이동합니다.",
+                }
+            )
+
+    excipients = copy.deepcopy(test.get("excipients")) if isinstance(test.get("excipients"), list) else []
+    reference_excipients = reference.get("excipients") if isinstance(reference.get("excipients"), list) else []
+    role_defaults = {
+        "disintegrant": ("交联羧甲纤维素钠", 0.0, 12.0),
+        "lubricant": ("硬脂酸镁", 0.0, 3.0),
+        "solubilizer": ("十二烷基硫酸钠", 0.0, 8.0),
+        "binder": ("聚维酮K30", 0.0, 12.0),
+    }
+
+    def role_amount(rows: list[dict[str, Any]], role: str) -> float:
+        return sum(float(row.get("amount_pct") or 0.0) for row in rows if str(row.get("role", "")).lower() == role)
+
+    excipient_patch: list[dict[str, Any]] = []
+    for role, (name, low, high) in role_defaults.items():
+        current = role_amount(excipients, role)
+        reference_value = role_amount(reference_excipients, role)
+        candidate = current
+        if goals & {"match_reference", "reduce_variability"}:
+            candidate = toward(current, reference_value, weight) or current
+        if role == "disintegrant" and goals & {"improve_f2", "fast_dissolution", "raise_cmax"}:
+            candidate = max(candidate, toward(current, max(reference_value, current + 1.0), weight) or current)
+        if role == "lubricant" and goals & {"improve_f2", "fast_dissolution", "raise_cmax"}:
+            candidate = min(candidate, toward(current, reference_value or min(current, 0.8), weight) or current)
+        if role == "solubilizer" and "raise_auc" in goals and "preserve_auc" not in goals:
+            candidate = max(candidate, toward(current, max(reference_value, 1.0), weight) or current)
+        if role == "binder" and "slow_release" in goals:
+            candidate = max(candidate, toward(current, max(reference_value, 4.0), weight) or current)
+        max_step = {"cautious": 1.0, "normal": 2.0, "strong": 3.5}.get(intensity, 2.0)
+        candidate = clamp(candidate, max(low, current - max_step), min(high, current + max_step))
+        if abs(candidate - current) < 0.05:
+            continue
+        suggested = round(candidate, 2)
+        excipient_patch.append({"role": role, "name": name, "amount_pct": suggested})
+        changes.append(
+            {
+                "kind": "excipient",
+                "field": role,
+                "label": f"{role} %",
+                "current": round(current, 2),
+                "suggested": suggested,
+                "unit": "%",
+                "reason": "기존 Test 조성을 기준으로 회차당 허용 변경폭 안에서 조정했습니다.",
+            }
+        )
+
+    if "slow_release" in goals:
+        fields["release_type"] = "extended"
+        fields["coating"] = "controlled-release coating / polymer matrix"
+        changes.extend(
+            [
+                {"kind": "field", "field": "release_type", "label": "释放类型", "current": test.get("release_type"), "suggested": "extended", "unit": "", "reason": "사용자가 명시적으로 완만한 방출을 요청했습니다."},
+                {"kind": "field", "field": "coating", "label": "包衣", "current": test.get("coating"), "suggested": fields["coating"], "unit": "", "reason": "방출 전략 변경 후보입니다. 제형 개발 검토가 필요합니다."},
+            ]
+        )
+        warnings.append("缓释/控释 전환은 단순 수치 최적화가 아니라 제형 전략 변경이므로 실험 검토 후 적용해야 합니다.")
+
+    for field in intent.get("locked_requests", []):
+        warnings.append(f"{field} 요청은 잠금 필드이므로 자동 변경안에서 제외했습니다.")
+    if not goals:
+        warnings.append("개선 목표를 명확히 인식하지 못했습니다. Cmax, AUC, f2 또는 용출 방향을 포함해 다시 요청해 주세요.")
+
+    return {
+        "fields": fields,
+        "excipients": excipient_patch,
+        "changes": changes,
+        "warnings": list(dict.fromkeys(warnings)),
+    }
+
+
+def _be_agent_apply_patch(request_payload: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
+    candidate = copy.deepcopy(request_payload)
+    test = candidate.setdefault("test", {})
+    for field, value in (patch.get("fields") or {}).items():
+        if field in BE_AGENT_LOCKED_FIELDS:
+            continue
+        test[field] = value
+    excipients = test.get("excipients") if isinstance(test.get("excipients"), list) else []
+    for change in patch.get("excipients") or []:
+        role = str(change.get("role", "")).lower()
+        if role not in {"disintegrant", "lubricant", "solubilizer", "binder"}:
+            continue
+        found = False
+        for row in excipients:
+            if str(row.get("role", "")).lower() == role:
+                row["amount_pct"] = change.get("amount_pct")
+                if not row.get("name"):
+                    row["name"] = change.get("name")
+                found = True
+                break
+        if not found:
+            excipients.append({"name": change.get("name"), "role": role, "amount_pct": change.get("amount_pct")})
+    test["excipients"] = excipients
+    return candidate
+
+
+@app.post("/api/v1/be/agent/suggest")
+def be_agent_suggest(
+    payload: Dict[str, Any],
+    user: Dict[str, Any] = Depends(_require_role("analyst")),
+) -> Dict[str, Any]:
+    """Interpret a natural-language BE optimization request and prepare a constrained Test-side patch."""
+    try:
+        message = str(payload.get("message", "")).strip()
+        if not message:
+            raise ValueError("message is required")
+        if len(message) > 2000:
+            raise ValueError("message is too long")
+        request_payload = payload.get("request") if isinstance(payload.get("request"), dict) else {}
+        result_payload = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+        if not request_payload.get("reference") or not request_payload.get("test") or not result_payload.get("summary"):
+            raise ValueError("Run BE first, then ask the optimization agent.")
+        conversation = payload.get("conversation") if isinstance(payload.get("conversation"), list) else []
+        keyword_intent = _be_agent_keyword_intent(message)
+        ollama_intent = None
+        if not keyword_intent.get("goals") and not keyword_intent.get("locked_requests"):
+            ollama_intent = _be_agent_ollama_intent(message, conversation)
+        intent = ollama_intent or keyword_intent
+        if not intent.get("goals") and keyword_intent.get("goals"):
+            intent["goals"] = keyword_intent["goals"]
+        if not intent.get("locked_requests") and keyword_intent.get("locked_requests"):
+            intent["locked_requests"] = keyword_intent["locked_requests"]
+        previous_intent = payload.get("previous_intent") if isinstance(payload.get("previous_intent"), dict) else {}
+        if not intent.get("goals") and previous_intent.get("goals"):
+            intent["goals"] = [goal for goal in previous_intent.get("goals", []) if goal in BE_AGENT_GOALS]
+        patch = _be_agent_build_patch(request_payload, result_payload, intent)
+        preview = None
+        if patch.get("changes"):
+            candidate_request = _be_agent_apply_patch(request_payload, patch)
+            preview_result = be_compare_run(candidate_request, user).get("data", {})
+            preview = {
+                "current": result_payload.get("summary", {}),
+                "predicted": preview_result.get("summary", {}),
+                "method": "Recalculated with the existing BE/PBBM engine before user application.",
+            }
+        summary_ko = intent.get("summary_ko") or f"요청을 {', '.join(intent.get('goals', [])) or '목표 불명확'} 방향으로 해석했습니다."
+        summary_zh = intent.get("summary_zh") or f"已将请求解释为：{', '.join(intent.get('goals', [])) or '目标不明确'}。"
+        return {
+            "ok": True,
+            "data": {
+                "assistant_message": f"{summary_ko} {summary_zh}",
+                "intent": intent,
+                "patch": patch,
+                "preview": preview,
+                "requires_user_apply": True,
+                "auto_applied": False,
+                "locked_fields": sorted(BE_AGENT_LOCKED_FIELDS),
+            },
+            "error": None,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"BE agent failed: {exc}")
 
 
 @app.post("/api/v1/be/optimize")

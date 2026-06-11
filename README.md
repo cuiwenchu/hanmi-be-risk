@@ -13,6 +13,7 @@ The application compares a reference product and a test product, predicts formul
 - Reference-parameter source and confidence labels
 - SANOFI and Ribociclib-like demonstration datasets
 - Formulation optimization candidates and multi-round adjustment suggestions
+- Result-aware BE optimization Agent with constrained Test-side proposals and preview recalculation
 - ADMET-AI integration with deterministic fallback
 - PBPK simulation through `mrgsolve`
 - PK/PD simulation through `RxODE2`
