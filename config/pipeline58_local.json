@@ -1,0 +1,19 @@
+{
+  "service_name": "hanmi-be-risk",
+  "service_version": "2.0.0",
+  "host": "0.0.0.0",
+  "port": 8781,
+  "prefer_real_admet_model": true,
+  "prefer_real_pbpk_model": true,
+  "prefer_real_pkpd_model": true,
+  "rscript_bin": "Rscript",
+  "default_species": "human",
+  "default_weight_kg": 70.0,
+  "default_micromolar_potency": 0.8,
+  "max_simulation_hours": 72,
+  "ddi_sources": {
+    "drugbank": "https://go.drugbank.com",
+    "stitch": "http://stitch.embl.de",
+    "pubmed": "https://pubmed.ncbi.nlm.nih.gov"
+  }
+}
