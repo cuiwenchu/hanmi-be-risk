@@ -5420,8 +5420,9 @@ Use preserve_auc or preserve_cmax when the user explicitly wants that metric hel
 Conversation:
 {chr(10).join(history)}
 Latest user request: {message}
+Always write the user-facing interpretation in Simplified Chinese, regardless of the input language.
 JSON schema:
-{{"goals":["..."],"intensity":"normal","locked_requests":["..."],"summary_ko":"short Korean interpretation","summary_zh":"short Chinese interpretation"}}"""
+{{"goals":["..."],"intensity":"normal","locked_requests":["..."],"summary_zh":"short Simplified Chinese interpretation"}}"""
     body = json.dumps(
         {
             "model": model,
@@ -5452,7 +5453,6 @@ JSON schema:
             "goals": list(dict.fromkeys(goals)),
             "intensity": intensity,
             "locked_requests": locked,
-            "summary_ko": str(parsed.get("summary_ko", ""))[:300],
             "summary_zh": str(parsed.get("summary_zh", ""))[:300],
             "interpreter": f"ollama:{model}",
         }
@@ -5572,12 +5572,12 @@ def _be_agent_build_patch(
         d30 = toward(d30, ref_d30)
     if "preserve_auc" in goals:
         sol = original["solubility_mg_ml"]
-        warnings.append("AUC 유지 요청에 따라 용해도 자동 변경을 제외했습니다.")
+        warnings.append("根据保持 AUC 的要求，已排除溶解度的自动修改。")
     if "preserve_cmax" in goals:
         d50 = original["particle_size_um"]
         d30 = original["dissolution_30min_pct"]
         compression = original["compression_force_kn"]
-        warnings.append("Cmax 유지 요청에 따라 D50, 30분 용출률, 압片力 자동 변경을 제외했습니다.")
+        warnings.append("根据保持 Cmax 的要求，已排除 D50、30 分钟溶出率和压片力的自动修改。")
 
     fraction = {"cautious": 0.20, "normal": 0.35, "strong": 0.50}.get(intensity, 0.35)
     d30_delta = {"cautious": 8.0, "normal": 15.0, "strong": 25.0}.get(intensity, 15.0)
@@ -5614,7 +5614,7 @@ def _be_agent_build_patch(
                 "current": current,
                 "suggested": suggested,
                 "unit": unit,
-                "reason": "사용자 목표와 현재 Reference/Test 차이를 반영한 제한 범위 내 후보값입니다.",
+                "reason": "根据用户目标及当前 Reference/Test 差异，在受限变更范围内生成的候选值。",
             }
         )
 
@@ -5631,7 +5631,7 @@ def _be_agent_build_patch(
                     "current": "当前 Test 曲线",
                     "suggested": "向 Reference 分段收敛",
                     "unit": "",
-                    "reason": "단일 30분 값만 바꾸지 않고 기존 Test 시간점을 Reference 방향으로 제한적으로 이동합니다.",
+                    "reason": "不只修改单一的 30 分钟数值，而是将现有 Test 各时间点按受限幅度向 Reference 曲线收敛。",
                 }
             )
 
@@ -5676,7 +5676,7 @@ def _be_agent_build_patch(
                 "current": round(current, 2),
                 "suggested": suggested,
                 "unit": "%",
-                "reason": "기존 Test 조성을 기준으로 회차당 허용 변경폭 안에서 조정했습니다.",
+                "reason": "以现有 Test 处方为基准，在单轮允许的变更幅度内进行调整。",
             }
         )
 
@@ -5685,16 +5685,16 @@ def _be_agent_build_patch(
         fields["coating"] = "controlled-release coating / polymer matrix"
         changes.extend(
             [
-                {"kind": "field", "field": "release_type", "label": "释放类型", "current": test.get("release_type"), "suggested": "extended", "unit": "", "reason": "사용자가 명시적으로 완만한 방출을 요청했습니다."},
-                {"kind": "field", "field": "coating", "label": "包衣", "current": test.get("coating"), "suggested": fields["coating"], "unit": "", "reason": "방출 전략 변경 후보입니다. 제형 개발 검토가 필요합니다."},
+                {"kind": "field", "field": "release_type", "label": "释放类型", "current": test.get("release_type"), "suggested": "extended", "unit": "", "reason": "用户明确要求更平缓的释放方式。"},
+                {"kind": "field", "field": "coating", "label": "包衣", "current": test.get("coating"), "suggested": fields["coating"], "unit": "", "reason": "这是释放策略的候选变更，需要进行制剂开发评估。"},
             ]
         )
-        warnings.append("缓释/控释 전환은 단순 수치 최적화가 아니라 제형 전략 변경이므로 실험 검토 후 적용해야 합니다.")
+        warnings.append("切换为缓释/控释并非单纯数值优化，而是制剂策略变更，必须经过实验评估后再应用。")
 
     for field in intent.get("locked_requests", []):
-        warnings.append(f"{field} 요청은 잠금 필드이므로 자동 변경안에서 제외했습니다.")
+        warnings.append(f"{field} 属于锁定字段，已从自动修改建议中排除。")
     if not goals:
-        warnings.append("개선 목표를 명확히 인식하지 못했습니다. Cmax, AUC, f2 또는 용출 방향을 포함해 다시 요청해 주세요.")
+        warnings.append("未能明确识别改善目标。请在请求中说明 Cmax、AUC、f2 或溶出方向。")
 
     return {
         "fields": fields,
@@ -5769,12 +5769,11 @@ def be_agent_suggest(
                 "predicted": preview_result.get("summary", {}),
                 "method": "Recalculated with the existing BE/PBBM engine before user application.",
             }
-        summary_ko = intent.get("summary_ko") or f"요청을 {', '.join(intent.get('goals', [])) or '목표 불명확'} 방향으로 해석했습니다."
         summary_zh = intent.get("summary_zh") or f"已将请求解释为：{', '.join(intent.get('goals', [])) or '目标不明确'}。"
         return {
             "ok": True,
             "data": {
-                "assistant_message": f"{summary_ko} {summary_zh}",
+                "assistant_message": summary_zh,
                 "intent": intent,
                 "patch": patch,
                 "preview": preview,

@@ -30,7 +30,7 @@
         <div class="agent-warnings" id="agent-warnings" hidden></div>
       </div>
       <div class="agent-composer">
-        <textarea id="agent-input" maxlength="2000" placeholder="例如：Cmax 조금 높이고 AUC는 유지해줘 / 提高 Cmax，但保持 AUC"></textarea>
+        <textarea id="agent-input" maxlength="2000" placeholder="例如：略微提高 Cmax，同时保持 AUC 不变"></textarea>
         <button class="btn" id="agent-send-btn" type="button">发送</button>
       </div>
       <div class="agent-safety">安全限制：仅修改 Test 受试制剂的允许参数。SMILES、盐型、晶型、pKa、logP、PPB、清除率及 API 供应商不会由 Agent 自动改写。</div>`;
@@ -71,7 +71,7 @@
     } else {
       agentAddMessage(
         "assistant",
-        "BE 결과가 연결되었습니다. 개선 방향을 말하면 현재 결과를 기준으로 Test 수치 변경안을 준비합니다. 적용 전 예상 결과를 먼저 보여드립니다."
+        "BE 结果已连接。请说明希望改善的方向，Agent 将根据当前结果准备 Test 参数调整方案，并在应用前显示预计算结果。"
       );
     }
     agentResultRunId = runId;
