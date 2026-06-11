@@ -83,6 +83,15 @@ class BeAgentSafetyTests(unittest.TestCase):
         self.assertEqual(self.request, original)
         self.assertNotEqual(candidate["test"], original["test"])
 
+    def test_risk_reduction_quick_prompt_uses_reference_matching(self):
+        intent = _be_agent_keyword_intent("请小幅改善 Cmax、AUC 和溶出 f2，使其接近参比")
+
+        self.assertIn("match_reference", intent["goals"])
+        self.assertIn("improve_f2", intent["goals"])
+        self.assertNotIn("lower_cmax", intent["goals"])
+        self.assertNotIn("lower_auc", intent["goals"])
+        self.assertEqual(intent["intensity"], "cautious")
+
 
 if __name__ == "__main__":
     unittest.main()
