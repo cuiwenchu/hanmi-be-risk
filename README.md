@@ -11,7 +11,7 @@ The application compares a reference product and a test product, predicts formul
 - Dissolution similarity factor (`f2`)
 - API, excipient, process, and PK-exposure risk classification
 - Reference-parameter source and confidence labels
-- SANOFI and Ribociclib-like demonstration datasets
+- SANOFI 10/10 demonstration dataset
 - Formulation optimization candidates and multi-round adjustment suggestions
 - Result-aware BE optimization Agent with constrained Test-side proposals and preview recalculation
 - Seven-stage originator-development evidence package:
