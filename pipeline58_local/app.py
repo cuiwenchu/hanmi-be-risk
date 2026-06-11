@@ -4431,6 +4431,18 @@ def be_agent_javascript() -> FileResponse:
     )
 
 
+@app.get("/static/be_development.js", response_class=FileResponse)
+def be_development_javascript() -> FileResponse:
+    asset_path = Path(__file__).resolve().parent / "static" / "be_development.js"
+    if not asset_path.exists():
+        raise HTTPException(status_code=404, detail="BE development evidence asset not found")
+    return FileResponse(
+        asset_path,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard_home(
     request: Request,
@@ -4810,6 +4822,242 @@ def auth_delete_user(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+def _be_evidence_float(source: Dict[str, Any], key: str, default: float | None = None) -> float | None:
+    value = source.get(key)
+    if value in (None, "", "auto", "Auto", "AUTO"):
+        return default
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _be_evidence_profile(value: Any) -> list[tuple[float, float]]:
+    rows: list[tuple[float, float]] = []
+    for raw in str(value or "").replace(";", "\n").splitlines():
+        line = raw.strip()
+        if not line or line.lower().startswith("time"):
+            continue
+        parts = [part.strip() for part in line.replace("\t", ",").split(",") if part.strip()]
+        if len(parts) < 2:
+            parts = line.split()
+        if len(parts) < 2:
+            continue
+        try:
+            rows.append((float(parts[0]), max(0.0, min(100.0, float(parts[1])))))
+        except Exception:
+            continue
+    return sorted(rows)
+
+
+def _be_evidence_f2(reference: Any, test: Any) -> Dict[str, Any]:
+    ref_rows = _be_evidence_profile(reference)
+    test_rows = _be_evidence_profile(test)
+    ref_map = {round(time, 4): value for time, value in ref_rows}
+    pairs = [
+        {"time_min": time, "reference_pct": ref_map[round(time, 4)], "test_pct": value}
+        for time, value in test_rows
+        if round(time, 4) in ref_map
+    ]
+    if len(pairs) < 3:
+        return {"available": False, "f2": None, "pass": None, "pairs": pairs}
+    mse = sum((row["test_pct"] - row["reference_pct"]) ** 2 for row in pairs) / len(pairs)
+    f2 = 50.0 * math.log10((1.0 + mse) ** -0.5 * 100.0)
+    return {"available": True, "f2": round(f2, 2), "pass": f2 >= 50.0, "pairs": pairs}
+
+
+def _be_evidence_success_probability(ratio: float | None, cv_pct: float, subjects: int) -> float | None:
+    if ratio is None or ratio <= 0 or subjects < 4:
+        return None
+    cv = max(cv_pct / 100.0, 0.01)
+    se = math.sqrt(2.0 * math.log(1.0 + cv * cv) / subjects)
+    lower = math.log(0.8) + 1.645 * se
+    upper = math.log(1.25) - 1.645 * se
+    if lower >= upper:
+        return 0.0
+    mean = math.log(ratio)
+    normal_cdf = lambda value: 0.5 * (1.0 + math.erf(value / math.sqrt(2.0)))
+    probability = normal_cdf((upper - mean) / se) - normal_cdf((lower - mean) / se)
+    return round(max(0.0, min(1.0, probability)) * 100.0, 1)
+
+
+def _be_development_evidence(
+    evidence: Dict[str, Any],
+    common: Dict[str, Any],
+    auc_ratio: float | None,
+    cmax_ratio: float | None,
+) -> Dict[str, Any]:
+    evidence = evidence if isinstance(evidence, dict) else {}
+    identity = evidence.get("reference_identity") if isinstance(evidence.get("reference_identity"), dict) else {}
+    lots = [row for row in evidence.get("reference_lots", []) if isinstance(row, dict)]
+    api_components = [row for row in evidence.get("api_components", []) if isinstance(row, dict)]
+    media_profiles = [row for row in evidence.get("dissolution_media", []) if isinstance(row, dict)]
+    process = evidence.get("process_parameters") if isinstance(evidence.get("process_parameters"), dict) else {}
+    calibration = evidence.get("model_calibration") if isinstance(evidence.get("model_calibration"), dict) else {}
+    design = evidence.get("be_design") if isinstance(evidence.get("be_design"), dict) else {}
+
+    def filled(source: Dict[str, Any], keys: tuple[str, ...]) -> int:
+        return sum(source.get(key) not in (None, "", []) for key in keys)
+
+    identity_keys = ("brand_name", "manufacturer", "market", "strength", "reference_status")
+    identity_score = filled(identity, identity_keys) / len(identity_keys) * 12.0
+    if bool(identity.get("verified")):
+        identity_score += 8.0
+
+    valid_lots = [row for row in lots if str(row.get("lot_no", "")).strip()]
+    lot_metric_keys = ("assay_pct", "total_impurities_pct", "hardness_n", "disintegration_min", "water_pct", "weight_rsd_pct")
+    lot_base = min(len(valid_lots) / 3.0, 1.0) * 8.0
+    lot_coverage = (
+        sum(filled(row, lot_metric_keys) / len(lot_metric_keys) for row in valid_lots) / max(len(valid_lots), 1) * 12.0
+    )
+    lot_score = lot_base + lot_coverage
+
+    api_keys = ("salt_form", "polymorph", "d10_um", "d50_um", "d90_um", "solubility_ph12", "solubility_ph45", "solubility_ph68")
+    api_score = (
+        sum(filled(row, api_keys) / len(api_keys) for row in api_components) / max(len(api_components), 1) * 20.0
+        if api_components
+        else 0.0
+    )
+
+    media_results = []
+    required_media = {"ph1.2", "ph4.5", "ph6.8"}
+    for row in media_profiles:
+        medium = str(row.get("medium", "")).strip().lower()
+        analysis = _be_evidence_f2(row.get("reference_profile"), row.get("test_profile"))
+        media_results.append(
+            {
+                "medium": medium,
+                "label": str(row.get("label") or medium),
+                "source": str(row.get("source") or ""),
+                **analysis,
+            }
+        )
+    required_results = [row for row in media_results if row["medium"] in required_media]
+    available_required = [row for row in required_results if row["available"]]
+    passed_required = [row for row in available_required if row["pass"]]
+    dissolution_score = min(len(available_required) / 3.0, 1.0) * 12.0 + min(len(passed_required) / 3.0, 1.0) * 8.0
+    multi_media_pass = (
+        all(row["pass"] for row in available_required) if len(available_required) == len(required_media) else None
+    )
+
+    process_keys = (
+        "blend_time_min",
+        "granulation_endpoint",
+        "drying_temp_c",
+        "lod_pct",
+        "compression_min_kn",
+        "compression_max_kn",
+        "coating_gain_pct",
+        "tablet_hardness_n",
+    )
+    process_score = filled(process, process_keys) / len(process_keys) * 10.0
+
+    calibration_keys = ("reference_cmax", "test_cmax", "reference_auc", "test_auc")
+    calibration_values = {key: _be_evidence_float(calibration, key) for key in calibration_keys}
+    calibration_complete = all(value is not None and value > 0 for value in calibration_values.values())
+    calibration_score = filled(calibration, calibration_keys) / len(calibration_keys) * 3.0
+    if bool(calibration.get("enabled")) and calibration_complete:
+        calibration_score = 5.0
+    calibration_result: Dict[str, Any] = {"available": False}
+    if calibration_complete:
+        observed_auc_ratio = calibration_values["test_auc"] / calibration_values["reference_auc"]
+        observed_cmax_ratio = calibration_values["test_cmax"] / calibration_values["reference_cmax"]
+        calibration_result = {
+            "available": True,
+            "enabled": bool(calibration.get("enabled")),
+            "source": str(calibration.get("source") or ""),
+            "observed_auc_ratio": round(observed_auc_ratio, 4),
+            "observed_cmax_ratio": round(observed_cmax_ratio, 4),
+            "auc_prediction_error_pct": round((auc_ratio - observed_auc_ratio) / observed_auc_ratio * 100.0, 1) if auc_ratio else None,
+            "cmax_prediction_error_pct": round((cmax_ratio - observed_cmax_ratio) / observed_cmax_ratio * 100.0, 1) if cmax_ratio else None,
+        }
+
+    design_keys = ("food_state", "study_design", "washout_days", "dropout_pct", "target_power_pct")
+    design_score = filled(design, design_keys) / len(design_keys) * 5.0
+    subject_n = max(int(_be_evidence_float(design, "subject_n", _be_evidence_float(common, "be_subject_n", 24.0)) or 24), 4)
+    cv_pct = max(_be_evidence_float(design, "cv_pct", _be_evidence_float(common, "be_cv_pct", 30.0)) or 30.0, 1.0)
+    dropout_pct = max(0.0, min(50.0, _be_evidence_float(design, "dropout_pct", 10.0) or 0.0))
+    effective_n = max(4, int(math.floor(subject_n * (1.0 - dropout_pct / 100.0))))
+    auc_probability = _be_evidence_success_probability(auc_ratio, cv_pct, effective_n)
+    cmax_probability = _be_evidence_success_probability(cmax_ratio, cv_pct, effective_n)
+    overall_probability = min(value for value in (auc_probability, cmax_probability) if value is not None) if any(value is not None for value in (auc_probability, cmax_probability)) else None
+    target_power = max(50.0, min(99.0, _be_evidence_float(design, "target_power_pct", 80.0) or 80.0))
+    recommended_n = None
+    for candidate_n in range(12, 121, 2):
+        candidate_effective = max(4, int(math.floor(candidate_n * (1.0 - dropout_pct / 100.0))))
+        probabilities = [
+            value
+            for value in (
+                _be_evidence_success_probability(auc_ratio, cv_pct, candidate_effective),
+                _be_evidence_success_probability(cmax_ratio, cv_pct, candidate_effective),
+            )
+            if value is not None
+        ]
+        if probabilities and min(probabilities) >= target_power:
+            recommended_n = candidate_n
+            break
+
+    lot_statistics: Dict[str, Any] = {}
+    for key in lot_metric_keys:
+        values = [value for row in valid_lots if (value := _be_evidence_float(row, key)) is not None]
+        if not values:
+            continue
+        mean = sum(values) / len(values)
+        rsd = math.sqrt(sum((value - mean) ** 2 for value in values) / max(len(values) - 1, 1)) / abs(mean) * 100.0 if mean else 0.0
+        lot_statistics[key] = {"n": len(values), "mean": round(mean, 3), "rsd_pct": round(rsd, 2)}
+
+    stage_scores = [
+        {"key": "identity", "label": "参比制剂身份确认", "score": round(identity_score, 1), "max": 20},
+        {"key": "lots", "label": "多批次实测", "score": round(lot_score, 1), "max": 20},
+        {"key": "api", "label": "API 关键特性", "score": round(api_score, 1), "max": 20},
+        {"key": "dissolution", "label": "多介质溶出", "score": round(dissolution_score, 1), "max": 20},
+        {"key": "process", "label": "处方与工艺范围", "score": round(process_score, 1), "max": 10},
+        {"key": "calibration", "label": "模型实测校准", "score": round(calibration_score, 1), "max": 5},
+        {"key": "design", "label": "BE 试验设计", "score": round(design_score, 1), "max": 5},
+    ]
+    readiness_score = round(sum(row["score"] for row in stage_scores), 1)
+    missing = []
+    if not bool(identity.get("verified")):
+        missing.append("确认参比制剂的 RLD/对照药身份、市场和批准信息")
+    if len(valid_lots) < 3:
+        missing.append("补充至少 3 个参比制剂商业批次的实测数据")
+    if api_score < 16:
+        missing.append("补充各 API 的晶型、D10/D50/D90 和 pH 溶解度")
+    if len(available_required) < 3:
+        missing.append("补充 pH 1.2、4.5、6.8 的 Reference/Test 配对溶出曲线")
+    if process_score < 7:
+        missing.append("补充混合、制粒、干燥、压片和包衣工艺范围")
+    if not calibration_complete:
+        missing.append("导入小试/预 BE 的 Reference/Test Cmax 与 AUC 实测值")
+
+    return {
+        "readiness_score": readiness_score,
+        "readiness_level": "高" if readiness_score >= 80 else "中" if readiness_score >= 50 else "低",
+        "stages": stage_scores,
+        "missing_priorities": missing,
+        "reference_identity": identity,
+        "lot_count": len(valid_lots),
+        "lot_statistics": lot_statistics,
+        "api_component_count": len(api_components),
+        "media_results": media_results,
+        "multi_media_pass": multi_media_pass,
+        "calibration": calibration_result,
+        "be_design": {
+            "subject_n": subject_n,
+            "effective_n": effective_n,
+            "cv_pct": cv_pct,
+            "dropout_pct": dropout_pct,
+            "target_power_pct": target_power,
+            "auc_success_probability_pct": auc_probability,
+            "cmax_success_probability_pct": cmax_probability,
+            "overall_success_probability_pct": overall_probability,
+            "recommended_subject_n": recommended_n,
+            "food_state": str(design.get("food_state") or "fasted"),
+            "study_design": str(design.get("study_design") or "2x2 crossover"),
+        },
+    }
+
+
 @app.post("/api/v1/be/compare")
 def be_compare_run(
     payload: Dict[str, Any],
@@ -5136,6 +5384,12 @@ def be_compare_run(
             and cmax_ci["low"] is not None and cmax_ci["low"] >= 0.8 and cmax_ci["high"] <= 1.25
         )
         f2 = f2_similarity(test_result["dissolution_profile"], ref_result["dissolution_profile"])
+        development = _be_development_evidence(
+            payload.get("development_evidence") if isinstance(payload.get("development_evidence"), dict) else {},
+            common,
+            auc_ratio,
+            cmax_ratio,
+        )
 
         api_findings: list[str] = []
         formulation_findings: list[str] = []
@@ -5184,6 +5438,12 @@ def be_compare_run(
             formulation_score += 10
             formulation_findings.append("matched dissolution time points are insufficient for f2")
             action_items.append("Complete matched reference/test dissolution points from 5 to 120 min under pH 1.2, 4.5 and 6.8 media.")
+        if development.get("multi_media_pass") is False:
+            formulation_score += 20
+            formulation_findings.append("one or more required multi-media dissolution profiles have f2 below 50")
+            action_items.append("Optimize the formulation against the failed pH 1.2/4.5/6.8 dissolution medium before BE confirmation.")
+        elif development.get("multi_media_pass") is True:
+            formulation_findings.append("all supplied pH 1.2/4.5/6.8 dissolution profiles meet f2 >= 50")
 
         for key, label in [("dosage_form", "dosage form"), ("process_type", "manufacturing process"), ("coating", "coating")]:
             if str(ref.get(key, "")).strip().lower() != str(test.get(key, "")).strip().lower():
@@ -5213,6 +5473,7 @@ def be_compare_run(
         for warning in test_result["applied"].get("excipient_effect", {}).get("warnings", []):
             formulation_score += 8
             formulation_findings.append(warning)
+        action_items.extend(development.get("missing_priorities", [])[:3])
 
         root_scores = {
             "API": round(api_score, 2),
@@ -5255,6 +5516,10 @@ def be_compare_run(
                 "f2_pass": f2.get("pass"),
                 "root_scores": root_scores,
                 "total_score": round(total_score, 2),
+                "development_readiness_score": development.get("readiness_score"),
+                "development_readiness_level": development.get("readiness_level"),
+                "multi_media_pass": development.get("multi_media_pass"),
+                "be_success_probability_pct": development.get("be_design", {}).get("overall_success_probability_pct"),
             },
             "reference": ref_result,
             "test": test_result,
@@ -5264,6 +5529,7 @@ def be_compare_run(
                 "formulation": formulation_findings or ["formulation/process inputs are broadly aligned or not supplied"],
                 "actions": action_items,
             },
+            "development_evidence": development,
             "method": {
                 "engine": "mrgsolve/PBBM internal comparison",
                 "be_criteria": "T/R 90% CI for Cmax and AUC within 80-125%; dissolution f2 >= 50 as formulation similarity screen",

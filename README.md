@@ -14,6 +14,15 @@ The application compares a reference product and a test product, predicts formul
 - SANOFI and Ribociclib-like demonstration datasets
 - Formulation optimization candidates and multi-round adjustment suggestions
 - Result-aware BE optimization Agent with constrained Test-side proposals and preview recalculation
+- Seven-stage originator-development evidence package:
+  - RLD/reference identity verification
+  - Three or more commercial reference lots
+  - Per-API salt, polymorph, PSD, and pH-solubility data
+  - Paired pH 1.2/4.5/6.8, FaSSIF, and FeSSIF dissolution profiles
+  - Formulation and manufacturing-process operating ranges
+  - Pilot/pre-BE Cmax and AUC model calibration
+  - BE study design, success probability, and suggested subject count
+- Development-readiness score with missing-data priorities and source-aware warnings
 - ADMET-AI integration with deterministic fallback
 - PBPK simulation through `mrgsolve`
 - PK/PD simulation through `RxODE2`
