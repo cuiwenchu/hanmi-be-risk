@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pipeline58 用户管理后台</title>
+  <style>
+    :root{--bg:#eef2f4;--ink:#1f2b31;--muted:#60727a;--line:rgba(31,43,49,.14);--accent:#1f5c76;--ok:#1e7f5c;--err:#b13b2e;--warn:#9a6b00}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:"Aptos","Segoe UI Variable","Noto Sans SC",sans-serif;background:linear-gradient(180deg,#f8fbfc,#eef2f4);color:var(--ink)}
+    .shell{max-width:1180px;margin:0 auto;padding:22px;display:grid;gap:12px}
+    .panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px}
+    h1{margin:0;font-size:30px}
+    .sub{margin-top:6px;color:var(--muted)}
+    .actions{display:flex;gap:10px;flex-wrap:wrap}
+    .btn,.link{border:1px solid rgba(31,92,118,.25);background:#fff;color:var(--accent);border-radius:10px;padding:9px 12px;font-weight:700;text-decoration:none;cursor:pointer}
+    .btn.primary{background:var(--accent);color:#fff;border-color:transparent}
+    .btn.warn{color:#8a5b00;border-color:rgba(138,91,0,.3)}
+    .btn.danger{color:#a13a2b;border-color:rgba(161,58,43,.3)}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    label{display:grid;gap:6px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+    input,select{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 10px;font-size:14px}
+    .status{min-height:20px;font-size:13px;color:var(--muted)} .status.ok{color:var(--ok)} .status.err{color:var(--err)} .status.warn{color:var(--warn)}
+    table{width:100%;border-collapse:collapse;font-size:14px}
+    th,td{padding:8px;border-bottom:1px solid rgba(31,43,49,.08);text-align:left;vertical-align:middle}
+    th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+    .pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:12px;color:var(--muted)}
+    .table-actions{display:flex;gap:6px;flex-wrap:wrap}
+    .mini{padding:5px 8px;border-radius:8px;font-size:12px;line-height:1.2}
+    @media (max-width:920px){.grid{grid-template-columns:1fr}.table-actions{flex-direction:column}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="panel">
+      <h1>用户管理后台 User Admin</h1>
+      <div class="sub">仅管理员可访问，账号数据已接入 PostgreSQL 持久化。</div>
+      <div class="actions" style="margin-top:10px;">
+        <a class="link" href="/" target="_blank" rel="noreferrer">返回主工作台</a>
+        <button class="btn" id="refresh-btn" type="button">刷新用户列表</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="grid">
+        <label>Username 用户名<input id="username" placeholder="e.g. analyst2"></label>
+        <label>Display Name 显示名<input id="display_name" placeholder="e.g. 分析员2"></label>
+        <label>Password 初始密码<input id="password" type="password" placeholder=">=6"></label>
+        <label>Role 角色
+          <select id="role"><option value="viewer">viewer</option><option value="analyst" selected>analyst</option><option value="admin">admin</option></select>
+        </label>
+      </div>
+      <div class="actions" style="margin-top:10px;">
+        <button class="btn primary" id="create-btn" type="button">创建用户</button>
+      </div>
+      <div class="status" id="status">Ready</div>
+    </section>
+
+    <section class="panel">
+      <h3 style="margin:0 0 8px;">用户列表</h3>
+      <table>
+        <thead><tr><th>用户名</th><th>显示名</th><th>角色</th><th>状态</th><th>最后登录时间</th><th>操作</th></tr></thead>
+        <tbody id="users-body"></tbody>
+      </table>
+    </section>
+  </div>
+
+  <script>
+    function setStatus(msg,t=''){const el=document.getElementById('status');el.textContent=msg;el.className='status'+(t?(' '+t):'');}
+    async function api(url,opts={}){const res=await fetch(url,opts);const body=await res.json().catch(()=>({}));if(!res.ok||body.ok===false)throw new Error(body.detail||body.error||`HTTP ${res.status}`);return body.data;}
+    function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
+
+    function fmtLastLogin(v){
+      if(!v) return '-';
+      const d=new Date(v);
+      if(Number.isNaN(d.getTime())) return escapeHtml(v);
+      return d.toLocaleString('zh-CN',{hour12:false});
+    }
+
+    function renderUsers(rows){
+      const body=document.getElementById('users-body');
+      body.innerHTML=(rows||[]).map(u=>{
+        const activeText=u.active?'active':'disabled';
+        const toggleText=u.active?'禁用':'启用';
+        return `<tr>
+          <td>${escapeHtml(u.username)}</td>
+          <td>${escapeHtml(u.display_name||'-')}</td>
+          <td><span class="pill">${escapeHtml(u.role)}</span></td>
+          <td>${activeText}</td>
+          <td>${fmtLastLogin(u.last_login_at)}</td>
+          <td><div class="table-actions">
+            <button class="btn mini" data-action="reset" data-user="${escapeHtml(u.username)}">重置密码</button>
+            <button class="btn mini warn" data-action="toggle" data-user="${escapeHtml(u.username)}" data-active="${u.active?'1':'0'}">${toggleText}</button>
+            <button class="btn mini danger" data-action="delete" data-user="${escapeHtml(u.username)}">删除用户</button>
+          </div></td>
+        </tr>`;
+      }).join('');
+    }
+
+    async function loadUsers(){
+      setStatus('正在加载用户列表...');
+      try{const rows=await api('/api/v1/auth/users');renderUsers(rows);setStatus(`已加载 ${rows.length} 个用户`,'ok');}
+      catch(err){setStatus(`加载失败: ${String(err)}`,'err');}
+    }
+
+    async function createUser(){
+      const payload={username:document.getElementById('username').value.trim(),display_name:document.getElementById('display_name').value.trim(),password:document.getElementById('password').value,role:document.getElementById('role').value,active:true};
+      if(!payload.username||!payload.password){setStatus('用户名和密码不能为空','err');return;}
+      setStatus('正在创建用户...');
+      try{const created=await api('/api/v1/auth/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});setStatus(`创建成功: ${created.username} (${created.role})`,'ok');document.getElementById('password').value='';await loadUsers();}
+      catch(err){setStatus(`创建失败: ${String(err)}`,'err');}
+    }
+
+    async function resetPassword(username){
+      const v=window.prompt(`给用户 ${username} 设置新密码(>=6):`,'');
+      if(v===null)return;
+      if(String(v).length<6){setStatus('新密码长度至少 6 位','err');return;}
+      try{await api(`/api/v1/auth/users/${encodeURIComponent(username)}/password-reset`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({new_password:v})});setStatus(`密码已重置: ${username}`,'ok');}
+      catch(err){setStatus(`重置失败: ${String(err)}`,'err');}
+    }
+
+    async function toggleUser(username,currentActive){
+      const next=!currentActive;
+      if(!window.confirm(next?`确认启用 ${username}?`:`确认禁用 ${username}?`))return;
+      try{await api(`/api/v1/auth/users/${encodeURIComponent(username)}/active`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:next})});setStatus(`状态已更新: ${username}`,'ok');await loadUsers();}
+      catch(err){setStatus(`更新失败: ${String(err)}`,'err');}
+    }
+
+    async function deleteUser(username){
+      if(!window.confirm(`确认删除用户 ${username}?`))return;
+      try{await api(`/api/v1/auth/users/${encodeURIComponent(username)}`,{method:'DELETE'});setStatus(`已删除: ${username}`,'ok');await loadUsers();}
+      catch(err){setStatus(`删除失败: ${String(err)}`,'err');}
+    }
+
+    document.getElementById('users-body').addEventListener('click',(e)=>{
+      const btn=e.target.closest('button[data-action]'); if(!btn)return;
+      const action=btn.getAttribute('data-action'); const username=btn.getAttribute('data-user')||''; if(!username)return;
+      if(action==='reset') return resetPassword(username);
+      if(action==='toggle') return toggleUser(username, btn.getAttribute('data-active')==='1');
+      if(action==='delete') return deleteUser(username);
+    });
+
+    document.getElementById('refresh-btn').addEventListener('click',loadUsers);
+    document.getElementById('create-btn').addEventListener('click',createUser);
+    loadUsers();
+  </script>
+</body>
+</html>

@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ADMET Workbench</title>
+  <style>
+    :root { --bg:#f2efe8; --panel:rgba(255,255,255,.84); --ink:#1e2a2f; --muted:#62747a; --line:rgba(30,42,47,.12); --accent:#204d63; --good:#1e7f5c; --warn:#c7851a; --bad:#b13b2e; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:"Aptos","Segoe UI Variable","Noto Sans SC",sans-serif;color:var(--ink);background:linear-gradient(180deg,#f7f3ec 0%,var(--bg) 100%)}
+    .shell{max-width:1320px;margin:0 auto;padding:26px 18px 40px}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:16px;box-shadow:0 12px 30px rgba(24,39,48,.08)}
+    .hero{display:grid;grid-template-columns:1.2fr .8fr;gap:14px}
+    .title{font-size:38px;line-height:1.06;margin:0 0 8px}
+    .muted{color:var(--muted)}
+    .row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+    .field{display:grid;gap:6px}
+    .field input,.field select,.field textarea{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#fff}
+    .btn{border:0;border-radius:12px;padding:10px 14px;font-weight:700;cursor:pointer;background:var(--accent);color:#fff}
+    .btn.ghost{background:#fff;color:var(--accent);border:1px solid rgba(32,77,99,.24)}
+    .status{min-height:22px;font-size:13px;color:var(--muted);margin-top:8px}
+    .status.error{color:var(--bad)} .status.ok{color:var(--good)}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}
+    .metric-table{width:100%;border-collapse:collapse;font-size:13px}
+    .metric-table th,.metric-table td{border-bottom:1px solid rgba(30,42,47,.08);padding:7px 6px;text-align:left}
+    .badge{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700}
+    .badge.good{background:rgba(30,127,92,.16);color:var(--good)} .badge.warn{background:rgba(199,133,26,.17);color:var(--warn)} .badge.bad{background:rgba(177,59,46,.18);color:var(--bad)}
+    .chips{display:flex;flex-wrap:wrap;gap:8px}.chip{padding:6px 10px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:12px}
+    pre{margin:0;max-height:240px;overflow:auto;background:#17212a;color:#d9e4ec;border-radius:12px;padding:10px;font-size:12px}
+    .work-grid{display:grid;grid-template-columns:.95fr 1.05fr;gap:14px}
+    .task-list{display:grid;gap:10px;max-height:380px;overflow:auto}
+    .task-item{border:1px solid var(--line);border-radius:14px;padding:10px;background:#fff;cursor:pointer}
+    .task-item.active{border-color:rgba(32,77,99,.45)}
+    .task-top{display:flex;justify-content:space-between;gap:8px;align-items:center}
+    .pill{padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700}
+    .pill.running{background:rgba(199,133,26,.2);color:var(--warn)}
+    .pill.completed{background:rgba(30,127,92,.2);color:var(--good)}
+    .pill.failed{background:rgba(177,59,46,.2);color:var(--bad)}
+    .mono{font-family:"Consolas","SFMono-Regular",monospace}
+    .tiny{font-size:12px;color:var(--muted)}
+    .table-wrap{overflow:auto}
+    .table{width:100%;border-collapse:collapse;font-size:13px}
+    .table th,.table td{border-bottom:1px solid rgba(30,42,47,.08);padding:8px 6px;text-align:left;vertical-align:top}
+    @media(max-width:1020px){.hero,.grid,.row,.work-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="hero">
+      <section class="card">
+        <div class="muted" style="letter-spacing:.12em;text-transform:uppercase;font-size:12px">ADMET</div>
+        <h1 class="title">ADMET Independent Workbench</h1>
+        <div class="muted">Standalone ADMET deep-dive page. Use this page for single-compound ADMET analysis and task tracking.</div>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+          <a class="btn ghost" href="/">Back to dashboard</a>
+        </div>
+      </section>
+      <section class="card">
+        <div class="muted" style="font-size:12px;letter-spacing:.08em;text-transform:uppercase">Deep-dive status</div>
+        <div id="backend-meta" style="font-size:24px;font-weight:800;margin-top:6px">-</div>
+        <div class="muted" id="score-meta" style="margin-top:6px">Score: -</div>
+        <div class="chips" id="flag-chips" style="margin-top:10px"></div>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top:14px">
+      <div class="muted" style="letter-spacing:.1em;text-transform:uppercase;font-size:12px;margin-bottom:8px">Single task workbench</div>
+      <div class="work-grid">
+        <div>
+          <div class="row">
+            <label class="field"><span>Project name</span><input id="task-project-name" value="ADMET Single Screening"></label>
+            <label class="field"><span>Project code</span><input id="task-project-code" value="P58-BATCH"></label>
+            <label class="field"><span>Sample</span><button class="btn ghost" id="load-task-sample" type="button">Load single sample</button></label>
+          </div>
+          <div class="row" style="margin-top:10px;grid-template-columns:1fr">
+            <label class="field"><span>Compound list (single item)</span>
+              <textarea id="task-items" class="mono" style="min-height:120px">compound_name,smiles
+Midazolam,CC1=NC=C2N1C3=C(C=C(C=C3)Cl)C(c1ccccc1F)=NC2</textarea>
+            </label>
+            <label class="field"><span>Notes</span><textarea id="task-notes" style="min-height:84px" placeholder="Optional notes"></textarea></label>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+            <button class="btn" id="submit-task" type="button">Submit single screening task</button>
+            <button class="btn ghost" id="refresh-tasks" type="button">Refresh task queue</button>
+          </div>
+          <div class="status" id="task-status">Ready.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+            <a class="btn ghost" id="task-html-link" href="#" target="_blank" rel="noreferrer" aria-disabled="true">Open task HTML report</a>
+            <a class="btn ghost" id="task-csv-link" href="#" target="_blank" rel="noreferrer" aria-disabled="true">Export task CSV</a>
+          </div>
+        </div>
+        <div>
+          <div class="tiny" style="margin-bottom:6px">Task queue</div>
+          <div class="task-list" id="task-list"></div>
+        </div>
+      </div>
+      <div class="table-wrap" style="margin-top:12px">
+        <table class="table">
+          <thead><tr><th>Compound</th><th>GPU</th><th>Score</th><th>Oral F</th><th>HIA</th><th>hERG</th><th>DILI</th><th>Flags</th></tr></thead>
+          <tbody id="task-results"><tr><td colspan="8" class="tiny">No task result yet.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:14px">
+      <div class="row">
+        <label class="field"><span>Compound</span><input id="compound_name" value="Midazolam-like candidate"></label>
+        <label class="field"><span>Target</span><input id="target_name" value="CYP3A4"></label>
+        <label class="field"><span>Route</span><select id="route"><option value="po" selected>PO</option><option value="iv">IV</option></select></label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label class="field" style="grid-column:1/-1"><span>SMILES</span><input id="smiles" value="CN1C=NC2=C1N=CN2C"></label>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="run-btn" type="button">Run ADMET Deep-Dive</button>
+        <button class="btn ghost" id="sample-btn" type="button">Load sample</button>
+      </div>
+      <div class="status" id="status">Ready.</div>
+    </section>
+
+    <section class="grid">
+      <div class="card"><h3>Absorption</h3><div id="absorption"></div></div>
+      <div class="card"><h3>Distribution</h3><div id="distribution"></div></div>
+      <div class="card"><h3>Metabolism</h3><div id="metabolism"></div></div>
+      <div class="card"><h3>Excretion</h3><div id="excretion"></div></div>
+      <div class="card"><h3>Toxicity</h3><div id="toxicity"></div></div>
+      <div class="card"><h3>Descriptors</h3><div id="descriptors"></div></div>
+    </section>
+
+    <section class="card" style="margin-top:12px">
+      <h3>Raw model output</h3>
+      <pre id="raw">{}</pre>
+    </section>
+  </div>
+
+<script>
+(() => {
+  const statusNode = document.getElementById('status');
+  const runBtn = document.getElementById('run-btn');
+  const taskStatusNode = document.getElementById('task-status');
+  let authToken = localStorage.getItem('pipeline58-token') || '';
+  let currentTaskId = '';
+  let taskPollTimer = null;
+
+  function setStatus(msg, tone='') { statusNode.textContent = msg || ''; statusNode.className = `status${tone ? ` ${tone}` : ''}`; }
+  function setTaskStatus(msg, tone='') { taskStatusNode.textContent = msg || ''; taskStatusNode.className = `status${tone ? ` ${tone}` : ''}`; }
+  function riskClass(v) { const x=String(v||'').toLowerCase(); return x==='red'||x==='bad' ? 'bad' : (x==='yellow'||x==='warn'||x==='moderate' ? 'warn' : 'good'); }
+  function riskBadge(v) { const r=String(v||'-'); return `<span class="badge ${riskClass(r)}">${r}</span>`; }
+  function toNum(v) { const n=Number(v); return Number.isFinite(n) ? n : null; }
+  function fm(v,d=3){ const n=toNum(v); return n==null ? '-' : n.toFixed(d); }
+
+  async function apiFetch(url, options={}) {
+    const headers = Object.assign({}, options.headers || {});
+    if (authToken) headers['x-pipeline58-token'] = authToken;
+    const res = await fetch(url, Object.assign({}, options, { headers }));
+    if (res.status === 401) {
+      authToken=''; localStorage.removeItem('pipeline58-token');
+      throw new Error('Unauthorized. Please log in on the main dashboard first.');
+    }
+    return res;
+  }
+
+  function setTaskLinks(taskId){
+    const html = document.getElementById('task-html-link');
+    const csv = document.getElementById('task-csv-link');
+    if(!taskId){ html.href='#'; csv.href='#'; html.setAttribute('aria-disabled','true'); csv.setAttribute('aria-disabled','true'); return; }
+    const tokenQ = authToken ? `?token=${encodeURIComponent(authToken)}` : '';
+    html.href = `/api/v1/pipeline58/tasks/${taskId}/report/html${tokenQ}`;
+    csv.href = `/api/v1/pipeline58/tasks/${taskId}/results.csv${tokenQ}`;
+    html.removeAttribute('aria-disabled'); csv.removeAttribute('aria-disabled');
+  }
+
+  function parseSingleItem(text){
+    const src=String(text||'').trim(); if(!src) return [];
+    const lines=src.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+    if(!lines.length) return [];
+    const body=(lines[0].toLowerCase().includes('smiles')) ? lines.slice(1) : lines;
+    return body.map((line,i)=>{
+      if(line.includes(',')){
+        const p=line.split(',');
+        const name=(p[0]||'').trim()||`Compound ${i+1}`;
+        const smiles=(p.slice(1).join(',')||'').trim();
+        return {compound_name:name, smiles};
+      }
+      const pcs=line.split(/\s+/).filter(Boolean);
+      if(pcs.length<2) return {compound_name:`Compound ${i+1}`, smiles:pcs[0]||''};
+      return {compound_name:pcs.slice(1).join(' '), smiles:pcs[0]};
+    }).filter(x=>String(x.smiles||'').trim());
+  }
+
+  function renderTaskResults(items){
+    const tbody=document.getElementById('task-results');
+    if(!items || !items.length){ tbody.innerHTML='<tr><td colspan="8" class="tiny">No task result yet.</td></tr>'; return; }
+    tbody.innerHTML = items.map(item=>`<tr>
+      <td><strong>${item.compound_name || '-'}</strong><div class="mono tiny">${item.smiles || '-'}</div></td>
+      <td>GPU${item.gpu_index != null ? item.gpu_index : '-'}</td>
+      <td>${item.overall_admet_score ?? '-'}</td>
+      <td>${item.oral_f ?? '-'}</td>
+      <td>${item.hia ?? '-'}</td>
+      <td>${item.herg_risk || '-'}</td>
+      <td>${item.dili_risk || '-'}</td>
+      <td>${(item.risk_flags || []).join(' | ') || '-'}</td>
+    </tr>`).join('');
+  }
+
+  function taskPill(status){
+    const s=String(status||'-').toLowerCase();
+    const cls=s==='completed'?'completed':(s==='failed'?'failed':'running');
+    return `<span class="pill ${cls}">${s}</span>`;
+  }
+
+  function renderTaskList(items){
+    const holder=document.getElementById('task-list');
+    if(!items || !items.length){ holder.innerHTML='<div class="task-item"><div class="tiny">No single task yet.</div></div>'; return; }
+    holder.innerHTML = items.map(item=>`<div class="task-item ${item.task_id===currentTaskId?'active':''}" data-task-id="${item.task_id}">
+      <div class="task-top"><strong>${item.project_name || item.task_id}</strong>${taskPill(item.status)}</div>
+      <div class="tiny">${item.project_code || '-'} | ${item.created_at || '-'}</div>
+      <div class="tiny">Progress ${(item.progress_pct ?? 0)}% | ${(item.completed ?? 0)}/${(item.submitted ?? 0)}</div>
+    </div>`).join('');
+    holder.querySelectorAll('[data-task-id]').forEach(n=>n.addEventListener('click', ()=>loadTaskDetail(n.dataset.taskId, false)));
+  }
+
+  async function loadTaskDetail(taskId, refreshList=true){
+    if(!taskId) return;
+    const res=await apiFetch(`/api/v1/pipeline58/tasks/${taskId}`);
+    const j=await res.json();
+    const task=j.data || {};
+    currentTaskId=taskId;
+    setTaskLinks(taskId);
+    renderTaskResults(task.items || []);
+    setTaskStatus(`Task ${taskId} | ${task.status || '-'} | ${task.completed || 0}/${task.submitted || 0}`, task.status==='failed'?'error':(task.status==='completed'?'ok':''));
+    if(refreshList) await loadTasks(taskId);
+  }
+
+  async function loadTasks(focusTaskId=''){
+    const res=await apiFetch('/api/v1/pipeline58/tasks');
+    const j=await res.json();
+    const items=(j.data || []).filter(x=>String(x.task_type||'')==='admet-batch');
+    renderTaskList(items);
+    const target = focusTaskId || currentTaskId || (items[0] && items[0].task_id) || '';
+    if(target) await loadTaskDetail(target, false);
+    if(taskPollTimer){ clearTimeout(taskPollTimer); taskPollTimer=null; }
+    const hasActive=items.some(x=>['queued','running'].includes(String(x.status||'')));
+    if(hasActive){ taskPollTimer=setTimeout(()=>loadTasks(currentTaskId).catch(e=>setTaskStatus(String(e),'error')), 3000); }
+  }
+
+  async function submitSingleTask(){
+    const submit=document.getElementById('submit-task');
+    submit.disabled=true; submit.textContent='Submitting...';
+    try{
+      const items=parseSingleItem(document.getElementById('task-items').value);
+      if(!items.length) throw new Error('Please provide one compound record first.');
+      if(items.length>1) throw new Error(`Single-item mode: keep only 1 record (current ${items.length}).`);
+      const payload={
+        project_name:(document.getElementById('task-project-name').value || '').trim() || 'ADMET Single Screening',
+        project_code:(document.getElementById('task-project-code').value || '').trim() || 'P58-BATCH',
+        notes:(document.getElementById('task-notes').value || '').trim(),
+        items
+      };
+      const res=await apiFetch('/api/v1/pipeline58/tasks/admet-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const j=await res.json();
+      if(!res.ok || !j.ok) throw new Error(j.detail || j.error || 'Task submission failed');
+      setTaskStatus(`Task submitted: ${j.data.task_id}`, 'ok');
+      await loadTasks(j.data.task_id);
+    }catch(e){ setTaskStatus(`Submit failed: ${String(e)}`,'error'); }
+    finally{ submit.disabled=false; submit.textContent='Submit single screening task'; }
+  }
+
+  function renderMetricMap(holderId, obj) {
+    const holder = document.getElementById(holderId);
+    const items = obj || {};
+    const keys = Object.keys(items);
+    if (!keys.length) { holder.innerHTML = '<div class="muted">No data.</div>'; return; }
+    holder.innerHTML = `<table class="metric-table"><thead><tr><th>Endpoint</th><th>Value</th><th>Unit</th><th>Risk</th></tr></thead><tbody>` +
+      keys.map(k => {
+        const it = items[k] || {};
+        return `<tr><td>${k}</td><td>${fm(it.value, 3)}</td><td>${it.unit || '-'}</td><td>${riskBadge(it.risk || '-')}</td></tr>`;
+      }).join('') + '</tbody></table>';
+  }
+
+  function renderDescriptorMap(holderId, obj) {
+    const holder = document.getElementById(holderId);
+    const items = obj || {};
+    const keys = Object.keys(items);
+    if (!keys.length) { holder.innerHTML = '<div class="muted">No descriptors.</div>'; return; }
+    holder.innerHTML = `<table class="metric-table"><thead><tr><th>Name</th><th>Value</th></tr></thead><tbody>` +
+      keys.map(k => `<tr><td>${k}</td><td>${fm(items[k], 3)}</td></tr>`).join('') + '</tbody></table>';
+  }
+
+  function payloadFromForm() {
+    const compound = document.getElementById('compound_name').value.trim() || 'Unknown compound';
+    const smiles = document.getElementById('smiles').value.trim();
+    const target = document.getElementById('target_name').value.trim() || 'Unknown target';
+    const route = document.getElementById('route').value;
+    return {
+      project: { project_name: 'ADMET Deep-Dive', project_code: 'ADMET-DETAIL', owner: 'analyst', access_level: 'internal', tags: ['admet','deep-dive'] },
+      compound_name: compound,
+      smiles,
+      target_name: target,
+      indication: 'General',
+      potency_uM: 1.0,
+      mechanism: 'inhibition',
+      dosing: { route, dose_mg: 10, interval_hours: 24, repeat_days: 1 },
+      population: { species:'human', preset:'adult', ethnicity:'general', sex:'unknown', weight_kg:70, age_years:40, renal_impairment:false, hepatic_impairment:false, pregnant:false, renal_stage:'normal', hepatic_stage:'normal', pregnancy_trimester:'none' },
+      observations: [], concomitant_drugs: [], ddi_notes: [], fit: { enable_pk_fit:false, enable_pd_fit:false, profile:'quick' }
+    };
+  }
+
+  async function run() {
+    const payload = payloadFromForm();
+    if (!payload.smiles) { setStatus('SMILES is required.', 'error'); return; }
+    runBtn.disabled = true; runBtn.textContent = 'Running...';
+    setStatus('Submitting ADMET analysis...');
+    try {
+      const res = await apiFetch('/api/v1/admet/analyze', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+      });
+      const body = await res.json();
+      if (!res.ok || !body.ok) throw new Error(body.detail || body.error || 'ADMET analyze failed');
+      const d = body.data || {};
+      const backend = d.model_backend || {};
+      document.getElementById('backend-meta').textContent = `${backend.backend || '-'} / ${(backend.device || 'cpu').toUpperCase()}`;
+      document.getElementById('score-meta').textContent = `Score: ${d.overall_admet_score ?? '-'} | Compound: ${d.compound_name || '-'}`;
+      const flags = d.risk_flags || [];
+      document.getElementById('flag-chips').innerHTML = flags.length ? flags.map(x => `<span class="chip">${x}</span>`).join('') : '<span class="chip">No risk flags</span>';
+      renderMetricMap('absorption', d.absorption);
+      renderMetricMap('distribution', d.distribution);
+      renderMetricMap('metabolism', d.metabolism);
+      renderMetricMap('excretion', d.excretion);
+      renderMetricMap('toxicity', d.toxicity);
+      renderDescriptorMap('descriptors', d.descriptors);
+      document.getElementById('raw').textContent = JSON.stringify(d.raw_model_output || {}, null, 2);
+      setStatus('ADMET analysis completed.', 'ok');
+    } catch (e) {
+      setStatus(`Failed: ${String(e)}`, 'error');
+    } finally {
+      runBtn.disabled = false; runBtn.textContent = 'Run ADMET Deep-Dive';
+    }
+  }
+
+  document.getElementById('sample-btn').addEventListener('click', () => {
+    document.getElementById('compound_name').value = 'Midazolam-like candidate';
+    document.getElementById('target_name').value = 'CYP3A4';
+    document.getElementById('smiles').value = 'CN1C=NC2=C1N=CN2C';
+    document.getElementById('route').value = 'po';
+    setStatus('Sample loaded.', 'ok');
+  });
+  document.getElementById('run-btn').addEventListener('click', run);
+
+  document.getElementById('load-task-sample').addEventListener('click', ()=>{
+    document.getElementById('task-items').value='compound_name,smiles\nMidazolam,CC1=NC=C2N1C3=C(C=C(C=C3)Cl)C(c1ccccc1F)=NC2';
+    setTaskStatus('Single sample loaded.', 'ok');
+  });
+  document.getElementById('submit-task').addEventListener('click', submitSingleTask);
+  document.getElementById('refresh-tasks').addEventListener('click', ()=>loadTasks(currentTaskId).catch(e=>setTaskStatus(String(e),'error')));
+  loadTasks().catch(e=>setTaskStatus(String(e),'error'));
+})();
+</script>
+</body>
+</html>

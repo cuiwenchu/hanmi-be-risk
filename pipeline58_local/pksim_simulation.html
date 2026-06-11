@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PK-Sim Simulation</title>
+  <style>
+    :root{--bg:#f2efe8;--ink:#1e2a2f;--muted:#62747a;--line:rgba(30,42,47,.13);--accent:#204d63;--accent2:#2d6d7f;--good:#1e7f5c;--bad:#b13b2e;--warn:#9a6514;--soft:#f8fbfb;--shadow:0 18px 50px rgba(27,43,51,.12)}*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:"Aptos","Segoe UI Variable","Noto Sans SC",sans-serif;color:var(--ink);background:radial-gradient(circle at top left,rgba(32,77,99,.18),transparent 28%),linear-gradient(180deg,#f7f3ec 0%,var(--bg) 100%)}.shell{max-width:1280px;margin:0 auto;padding:26px 18px 44px}.card{border:1px solid rgba(255,255,255,.62);background:rgba(255,255,255,.84);border-radius:28px;padding:24px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}.head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}.kicker,.label{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:800}h1{font-size:46px;line-height:1;margin:8px 0 10px;letter-spacing:-.045em}h2{margin:0 0 6px}.copy{color:var(--muted);line-height:1.6;max-width:850px}.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.section{border-top:1px solid var(--line);padding-top:14px;margin-top:14px}label{display:grid;gap:6px;font-weight:800}label small{color:var(--muted);letter-spacing:.08em;text-transform:uppercase}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.9);padding:12px 14px;color:var(--ink);font:inherit}textarea{min-height:86px}button,.btn{border:0;border-radius:16px;padding:14px 18px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:white;cursor:pointer;font-weight:900;text-decoration:none;text-align:center}button:disabled{opacity:.6;cursor:wait}.btn.ghost,.ghost{background:rgba(255,255,255,.86);color:var(--accent);border:1px solid var(--line)}.ghost.active,.case-chip.active{background:rgba(32,77,99,.1);border-color:rgba(32,77,99,.35)}.status{margin-top:10px;min-height:22px;color:var(--muted);font-weight:800}.status.ok{color:var(--good)}.status.error{color:var(--bad)}.casebar{display:grid;gap:12px}.case-actions,.case-list,.toplinks{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.case-chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.86);color:var(--accent);font-weight:900;padding:12px 14px}.case-chip .x{border:0;background:rgba(177,59,46,.09);color:var(--bad);border-radius:999px;padding:2px 8px;font-size:14px;line-height:1}.create-panel{display:none;grid-template-columns:minmax(240px,1fr) auto auto;gap:10px;align-items:center}.create-panel.show{display:grid}.hint{font-size:12px;color:var(--muted);line-height:1.5}.alert{display:none;border:1px solid rgba(154,101,20,.28);background:rgba(255,244,222,.86);color:#6d4407;border-radius:18px;padding:14px 16px;margin-top:14px;line-height:1.55;font-weight:800}.alert.show{display:block}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px}.metric{border:1px solid var(--line);background:rgba(255,255,255,.88);border-radius:18px;padding:16px;min-width:0}.metric .name{font-size:11px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase}.metric .value{font-size:25px;font-weight:900;margin-top:6px;word-break:break-word}.metric .note{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.45}.notes{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.note{border:1px solid var(--line);background:rgba(255,255,255,.82);border-radius:999px;padding:8px 10px;color:var(--muted);font-size:12px}.note.warn{border-color:rgba(154,101,20,.28);background:rgba(255,244,222,.86);color:#6d4407}.mono{font-family:"Cascadia Code",Consolas,monospace;font-size:12px}.chart{width:100%;height:280px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,#fff,rgba(240,247,247,.85));margin-top:14px}.raw-wrap{margin-top:12px}.raw-wrap pre{white-space:pre-wrap;display:none;border:1px solid var(--line);background:rgba(255,255,255,.78);border-radius:18px;padding:14px;max-height:520px;overflow:auto}.toplinks{justify-content:flex-end}@media(max-width:900px){.row2,.row3,.metrics,.create-panel{grid-template-columns:1fr}.head{display:grid}h1{font-size:34px}.toplinks{justify-content:flex-start}}
+
+.ketcher-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px}.ketcher-modal{position:fixed;inset:0;z-index:999;background:rgba(20,28,34,.62);backdrop-filter:blur(8px);display:none;align-items:center;justify-content:center;padding:24px}.ketcher-modal.show{display:flex}.ketcher-panel{width:min(1120px,96vw);height:min(760px,92vh);background:#fff;border-radius:22px;box-shadow:0 24px 80px rgba(0,0,0,.28);display:grid;grid-template-rows:auto 1fr auto;overflow:hidden}.ketcher-head,.ketcher-foot{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line,rgba(30,42,47,.13))}.ketcher-foot{border-top:1px solid var(--line,rgba(30,42,47,.13));border-bottom:0}.ketcher-head h3{margin:0;font-size:18px}.ketcher-frame{width:100%;height:100%;border:0}.ketcher-close{background:rgba(255,255,255,.86)!important;color:var(--accent,#204d63)!important;border:1px solid var(--line,rgba(30,42,47,.13))!important}.ketcher-apply{min-width:180px}.ketcher-status{color:var(--muted,#62747a);font-size:12px;line-height:1.4}@media(max-width:700px){.ketcher-panel{height:94vh}.ketcher-foot{display:grid}.ketcher-apply{width:100%}}
+
+</style>
+</head>
+<body>
+  <main class="shell">
+    <section class="card">
+      <div class="head">
+        <div>
+          <div class="kicker">PK-Sim / OSPSuite</div>
+          <h1>PK-Sim Simulation Workbench</h1>
+          <div class="copy">Independent simulation page. It runs a PKML simulation and returns PK metrics plus the concentration-time curve. STEP 5-8 inputs are separate.</div>
+        </div>
+        <div class="toplinks"><a class="btn ghost" href="/" target="_self">Portal</a><a class="btn ghost" href="/step58" target="_blank">STEP 5-8</a><a class="btn ghost" href="/admet" target="_blank">ADMET</a></div>
+      </div>
+
+      <div class="section casebar">
+        <div class="label">Saved PK-Sim cases</div>
+        <div class="case-actions">
+          <button class="ghost" type="button" data-builtin="caffeine">Caffeine default</button>
+          <button class="ghost" type="button" data-builtin="aciclovir">Aciclovir template</button>
+          <button class="ghost" type="button" id="new-case-btn">+ New case</button>
+        </div>
+        <div class="create-panel" id="create-panel">
+          <input id="case-name" placeholder="Case name, e.g. 1????? / test1">
+          <button type="button" id="case-create-btn">Create from current form</button>
+          <button class="ghost" type="button" id="case-cancel-btn">Cancel</button>
+        </div>
+        <div class="case-list" id="case-list"></div>
+        <div class="hint">Saved cases are stored in this browser. When a saved case is active, running the simulation automatically updates that case with the current form values.</div>
+      </div>
+
+      <form id="pksim-form">
+        <div class="section"><div class="label">Project</div><div class="row2"><label>Project name<small>PK-Sim project</small><input name="project_name" value="PK-Sim Simulation Project"></label><label>Project code<small>Code</small><input name="project_code" value="PKSIM-SIM"></label></div></div>
+        <div class="section"><div class="label">Compound</div><div class="row2"><label>Compound name<small>Name</small><input name="compound_name" value="Caffeine" required></label><label>Target<small>Optional</small><input name="target_name" value="A2A"></label></div><label>SMILES<small>Stored with request. The PKML template controls the actual model unless a compound-specific PKML is provided.</small><textarea name="smiles">CN1C=NC2=C1N(C(=O)N(C)C2=O)C</textarea></label><div class="ketcher-tools"><button class="ghost" type="button" data-ketcher-field="smiles">Draw structure with Ketcher</button><span class="hint">Draw a molecule and apply its SMILES to this field.</span></div></div>
+        <div class="section"><div class="label">Dosing / Population</div><div class="row3"><label>Route<small>Administration</small><select name="route"><option value="po" selected>PO / oral</option><option value="iv">IV</option></select></label><label>Dose<small>mg</small><input name="dose_mg" type="number" step="0.1" value="100"></label><label>Repeat days<small>days</small><input name="repeat_days" type="number" step="1" value="2"></label></div><div class="row3"><label>Interval<small>hours</small><input name="interval_hours" type="number" step="1" value="24"></label><label>Weight<small>kg</small><input name="weight_kg" type="number" step="0.1" value="70"></label><label>Age<small>years</small><input name="age_years" type="number" step="1" value="40"></label></div></div>
+        <div class="section"><div class="label">Template</div><label>PKML template path<small>Blank uses installed OSPSuite Aciclovir PKML</small><input name="pkml_path" placeholder="Optional: /path/to/model.pkml or C:\Pipeline58\templates\oral.pkml"></label><label>Notes<small>Simulation notes</small><textarea name="notes"></textarea></label></div>
+        <div class="section"><button id="run-btn" type="submit">Run PK-Sim Simulation</button><div class="status" id="status">Waiting.</div></div>
+      </form>
+
+      <section class="section" id="result-card">
+        <div class="head"><div><h2>Simulation Result</h2><div class="copy">Actual result appears after running. If the template molecule differs from the requested compound, this is a template-based simulation, not a compound-specific model.</div></div><div class="label" id="result-state">Not run</div></div>
+        <div class="alert" id="template-alert"></div>
+        <div class="metrics" id="metrics"></div>
+        <svg class="chart" id="chart" viewBox="0 0 720 280" preserveAspectRatio="none"></svg>
+        <div class="notes" id="notes"></div>
+        <div class="raw-wrap"><button class="ghost" type="button" id="raw-toggle">Show JSON result</button><pre class="mono" id="raw"></pre></div>
+      </section>
+    </section>
+  </main>
+
+<div class="ketcher-modal" id="ketcher-modal" aria-hidden="true">
+  <div class="ketcher-panel">
+    <div class="ketcher-head"><h3>Ketcher Molecule Editor</h3><button class="ketcher-close" type="button" id="ketcher-close">Close</button></div>
+    <iframe class="ketcher-frame" id="ketcher-frame" data-src="/ketcher/" title="Ketcher molecule editor"></iframe>
+    <div class="ketcher-foot"><div class="ketcher-status" id="ketcher-status">Draw or paste a molecule, then apply SMILES back to the form.</div><button class="ketcher-apply" type="button" id="ketcher-apply">Apply SMILES</button></div>
+  </div>
+</div>
+
+<script>
+const form=document.getElementById('pksim-form'), runBtn=document.getElementById('run-btn'), statusEl=document.getElementById('status'), metrics=document.getElementById('metrics'), notes=document.getElementById('notes'), raw=document.getElementById('raw'), state=document.getElementById('result-state'), alertBox=document.getElementById('template-alert');
+const CASE_KEY='pipeline58.pksim.cases.v1'; const ACTIVE_KEY='pipeline58.pksim.activeCase.v1'; let activeCaseId=localStorage.getItem(ACTIVE_KEY)||'';
+const builtins={
+  caffeine:{project_name:'PK-Sim Simulation Project',project_code:'PKSIM-SIM',compound_name:'Caffeine',target_name:'A2A',smiles:'CN1C=NC2=C1N(C(=O)N(C)C2=O)C',route:'po',dose_mg:100,repeat_days:2,interval_hours:24,weight_kg:70,age_years:40,pkml_path:'',notes:''},
+  aciclovir:{project_name:'PK-Sim Aciclovir Template',project_code:'PKSIM-ACV',compound_name:'Aciclovir',target_name:'Viral DNA polymerase',smiles:'C1=NC2=C(N1COCCO)N=C(NC2=O)N',route:'po',dose_mg:400,repeat_days:2,interval_hours:8,weight_kg:70,age_years:40,pkml_path:'',notes:'Uses installed OSPSuite Aciclovir PKML template.'}
+};
+function setStatus(msg,tone=''){statusEl.textContent=msg;statusEl.className='status'+(tone?' '+tone:'')}
+async function apiFetch(url, options={}){const res=await fetch(url, options); if(res.status===401){location.href='/login'; throw new Error('Unauthorized');} if(res.status===403) throw new Error('Forbidden'); return res;}
+function str(v){return String(v??'').trim()} function num(v,d=0){const n=Number(v); return Number.isFinite(n)?n:d}
+function formValues(){const fd=new FormData(form); return {project_name:str(fd.get('project_name')),project_code:str(fd.get('project_code')),compound_name:str(fd.get('compound_name')),target_name:str(fd.get('target_name')),smiles:String(fd.get('smiles')||''),route:str(fd.get('route')||'po'),dose_mg:num(fd.get('dose_mg')),repeat_days:num(fd.get('repeat_days'),1),interval_hours:num(fd.get('interval_hours'),24),weight_kg:num(fd.get('weight_kg'),70),age_years:num(fd.get('age_years'),40),pkml_path:str(fd.get('pkml_path')),notes:String(fd.get('notes')||'')};}
+function fillForm(v){Object.entries(v||{}).forEach(([k,val])=>{const el=form.elements[k]; if(el) el.value=val??'';});}
+function bodyFromForm(){const v=formValues(); return {compound_name:v.compound_name, route:v.route, dose_mg:v.dose_mg, interval_hours:v.interval_hours, repeat_days:v.repeat_days, total_hours:Math.max(24,v.repeat_days*v.interval_hours), path_filter:'PeripheralVenousBlood|Plasma', pkml_path:v.pkml_path, compound_parameters:{}, project:{project_name:v.project_name, project_code:v.project_code}, population:{weight_kg:v.weight_kg, age_years:v.age_years}, notes:v.notes, smiles:v.smiles, target_name:v.target_name};}
+function loadCases(){try{return JSON.parse(localStorage.getItem(CASE_KEY)||'[]')}catch{return []}}
+function saveCases(cases){localStorage.setItem(CASE_KEY,JSON.stringify(cases)); renderCases();}
+function saveActiveCase(){if(!activeCaseId) return; const cases=loadCases(); const i=cases.findIndex(c=>c.id===activeCaseId); if(i>=0){cases[i].values=formValues(); cases[i].updated_at=new Date().toISOString(); localStorage.setItem(CASE_KEY,JSON.stringify(cases)); renderCases();}}
+function renderCases(){const list=document.getElementById('case-list'); const cases=loadCases(); if(!cases.length){list.innerHTML='<span class="hint">No custom PK-Sim cases yet.</span>'; return;} list.innerHTML=cases.map(c=>`<span class="case-chip ${c.id===activeCaseId?'active':''}" data-case-id="${c.id}"><button class="ghost" type="button" data-load-case="${c.id}">${escapeHtml(c.name)}</button><button class="x" type="button" title="Delete" data-delete-case="${c.id}">x</button></span>`).join('');}
+function escapeHtml(s){return String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));}
+document.querySelectorAll('[data-builtin]').forEach(btn=>btn.addEventListener('click',()=>{activeCaseId=''; localStorage.removeItem(ACTIVE_KEY); fillForm(builtins[btn.dataset.builtin]); renderCases(); setStatus(`Loaded built-in case: ${btn.textContent}`);}));
+document.getElementById('new-case-btn').addEventListener('click',()=>{document.getElementById('create-panel').classList.add('show'); document.getElementById('case-name').focus();});
+document.getElementById('case-cancel-btn').addEventListener('click',()=>{document.getElementById('create-panel').classList.remove('show'); document.getElementById('case-name').value='';});
+document.getElementById('case-create-btn').addEventListener('click',()=>{const name=str(document.getElementById('case-name').value); if(!name){setStatus('Please enter a case name.','error'); return;} const cases=loadCases(); const id='case_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7); cases.push({id,name,values:formValues(),created_at:new Date().toISOString(),updated_at:new Date().toISOString()}); activeCaseId=id; localStorage.setItem(ACTIVE_KEY,id); saveCases(cases); document.getElementById('create-panel').classList.remove('show'); document.getElementById('case-name').value=''; setStatus(`Created and selected case: ${name}`,'ok');});
+document.getElementById('case-list').addEventListener('click',e=>{const load=e.target.closest('[data-load-case]'), del=e.target.closest('[data-delete-case]'); if(load){const c=loadCases().find(x=>x.id===load.dataset.loadCase); if(c){activeCaseId=c.id; localStorage.setItem(ACTIVE_KEY,c.id); fillForm(c.values); renderCases(); setStatus(`Loaded case: ${c.name}`,'ok');}} if(del){const cases=loadCases(); const c=cases.find(x=>x.id===del.dataset.deleteCase); if(!c) return; if(!confirm(`Delete case "${c.name}"?`)) return; const next=cases.filter(x=>x.id!==c.id); if(activeCaseId===c.id){activeCaseId=''; localStorage.removeItem(ACTIVE_KEY);} saveCases(next); setStatus(`Deleted case: ${c.name}`,'ok');}});
+function listify(v){if(!v) return []; if(Array.isArray(v)) return v.filter(Boolean).map(String); return [String(v)];}
+function metric(label,value,note=''){return `<div class="metric"><div class="name">${escapeHtml(label)}</div><div class="value">${escapeHtml(value||'-')}</div><div class="note">${escapeHtml(note||'')}</div></div>`}
+function renderChart(points){const svg=document.getElementById('chart'); points=points||[]; if(points.length<2){svg.innerHTML=''; return;} const w=720,h=280,m={l:52,r:18,t:18,b:38}; const maxX=Math.max(...points.map(p=>Number(p.time_h||0)),1), maxY=Math.max(...points.map(p=>Number(p.conc||0)),1); const x=v=>m.l+Number(v)/maxX*(w-m.l-m.r); const y=v=>h-m.b-Number(v)/maxY*(h-m.t-m.b); const d=points.map((p,i)=>(i?'L':'M')+x(p.time_h).toFixed(1)+' '+y(p.conc).toFixed(1)).join(' '); svg.innerHTML=`<line x1="${m.l}" y1="${h-m.b}" x2="${w-m.r}" y2="${h-m.b}" stroke="#b8c7cc"/><line x1="${m.l}" y1="${m.t}" x2="${m.l}" y2="${h-m.b}" stroke="#b8c7cc"/><path d="${d}" fill="none" stroke="#204d63" stroke-width="3"/><text x="${m.l}" y="${h-9}" font-size="13" fill="#62747a">0 h</text><text x="${w-m.r-55}" y="${h-9}" font-size="13" fill="#62747a">${maxX.toFixed(1)} h</text><text x="8" y="${m.t+8}" font-size="13" fill="#62747a">${maxY.toFixed(2)}</text>`;}
+function render(data){const result=data.result||{}, pk=result.pk||{}, backend=result.backend||{}, curve=result.concentration_time_curve||[], req=data.request||{}; state.textContent='Simulation completed'; const requested=backend.mapped_compound||req.compound_name||formValues().compound_name||'-'; const template=backend.template_molecule||'-'; const pkml=backend.pkml||req.pkml_path||'-'; const mismatch=requested&&template&&template!=='-'&&requested.toLowerCase()!==template.toLowerCase(); metrics.innerHTML=[metric('Cmax', pk.Cmax?`${pk.Cmax.value} ${pk.Cmax.unit||''}`:'-', 'Actual PKML simulation output'), metric('Tmax', pk.Tmax?`${pk.Tmax.value} ${pk.Tmax.unit||'h'}`:'-', 'Time of Cmax'), metric('AUC0-t', pk.AUC0_t?`${pk.AUC0_t.value} ${pk.AUC0_t.unit||''}`:'-', `${curve.length} curve points`), metric('Engine', backend.model||'PK-Sim', 'OSPSuite PKML runner'), metric('Requested compound', requested, 'Form input'), metric('PKML template molecule', template, pkml)].join(''); if(mismatch){alertBox.className='alert show'; alertBox.textContent=`Template notice: requested compound is ${requested}, but the executed PKML template molecule is ${template}. This is a real PKML simulation, but it is template-based until a compound-specific PKML is supplied.`;} else {alertBox.className='alert'; alertBox.textContent='';} const warnings=[...listify((result.pkml_mapping||{}).warnings), ...(mismatch?[`Template molecule differs from requested compound: ${template} vs ${requested}`]:[])]; notes.innerHTML=['Actual simulation completed: PKML loaded, simulation executed, concentration-time curve and PK metrics exported.', data.artifact_path?`Server artifact: ${data.artifact_path}`:'', ...warnings].filter(Boolean).map((n,i)=>`<span class="note ${i>1?'warn':''}">${escapeHtml(n)}</span>`).join(''); renderChart(curve); raw.textContent=JSON.stringify(data,null,2);}
+document.getElementById('raw-toggle').addEventListener('click',()=>{const open=raw.style.display==='block'; raw.style.display=open?'none':'block'; document.getElementById('raw-toggle').textContent=open?'Show JSON result':'Hide JSON result';});
+form.addEventListener('submit', async e=>{e.preventDefault(); saveActiveCase(); runBtn.disabled=true; runBtn.textContent='Running...'; setStatus('Running actual PKML simulation through OSPSuite.'); try{const res=await apiFetch('/api/v1/pksim/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(bodyFromForm())}); const payload=await res.json(); if(!res.ok||!payload.ok) throw new Error(payload.detail||payload.error||'Simulation failed'); render(payload.data); saveActiveCase(); setStatus(`Simulation completed: ${payload.data.run_id}`,'ok');}catch(err){state.textContent='Failed'; setStatus(`Simulation failed: ${String(err)}`,'error'); notes.innerHTML=`<span class="note warn">${escapeHtml(String(err))}</span>`;}finally{runBtn.disabled=false;runBtn.textContent='Run PK-Sim Simulation';}});
+
+function applyIncomingParams(){
+  const params=new URLSearchParams(location.search);
+  if(!params.has('source')) return;
+  const map={project_name:'project_name',project_code:'project_code',compound_name:'compound_name',target_name:'target_name',smiles:'smiles',route:'route',dose_mg:'dose_mg',repeat_days:'repeat_days',interval_hours:'interval_hours',weight_kg:'weight_kg',age_years:'age_years',pkml_path:'pkml_path'};
+  Object.entries(map).forEach(([key,field])=>{if(params.has(key)&&form.elements[field]) form.elements[field].value=params.get(key);});
+  const incomingNotes=[];
+  if(params.get('source_run_id')) incomingNotes.push(`PBPK source run: ${params.get('source_run_id')}`);
+  if(params.get('cmax')||params.get('tmax')||params.get('auc')) incomingNotes.push(`PBPK metrics: Cmax=${params.get('cmax')||'-'}, Tmax=${params.get('tmax')||'-'}, AUC=${params.get('auc')||'-'}`);
+  if(params.get('notes')) incomingNotes.push(params.get('notes'));
+  if(incomingNotes.length&&form.elements.notes) form.elements.notes.value=incomingNotes.join('\n');
+  activeCaseId='';
+  localStorage.removeItem(ACTIVE_KEY);
+  renderCases();
+  setStatus('Loaded PBPK result input. Review PKML template, then run PK-Sim Simulation.','ok');
+}
+
+applyIncomingParams();
+renderCases();
+
+let activeKetcherField=null;
+function getSmilesInput(name){return document.querySelector(`[name="${name}"]`);}
+function setKetcherStatus(msg){const el=document.getElementById('ketcher-status'); if(el) el.textContent=msg;}
+async function waitForKetcherApi(frame, tries=30){
+  for(let i=0;i<tries;i++){
+    const api=frame.contentWindow&&frame.contentWindow.ketcher;
+    if(api&&typeof api.getSmiles==='function') return api;
+    await new Promise(resolve=>setTimeout(resolve,250));
+  }
+  throw new Error('Ketcher editor is not ready yet.');
+}
+async function preloadKetcherMolecule(field){
+  const frame=document.getElementById('ketcher-frame');
+  const smiles=String(field?.value||'').trim();
+  if(!smiles) return;
+  try{
+    const api=await waitForKetcherApi(frame,20);
+    if(typeof api.setMolecule==='function') await api.setMolecule(smiles);
+    setKetcherStatus('Current SMILES loaded into Ketcher. Edit structure and apply when ready.');
+  }catch(err){setKetcherStatus('Ketcher opened. Existing SMILES could not be preloaded; draw or paste structure manually.');}
+}
+function openKetcherFor(name){
+  const field=getSmilesInput(name);
+  if(!field){setKetcherStatus('SMILES input field not found.');return;}
+  activeKetcherField=field;
+  const modal=document.getElementById('ketcher-modal'), frame=document.getElementById('ketcher-frame');
+  if(frame&&!frame.getAttribute('src')) frame.setAttribute('src',frame.dataset.src||'/ketcher/');
+  modal?.classList.add('show');
+  modal?.setAttribute('aria-hidden','false');
+  setKetcherStatus('Loading Ketcher molecule editor...');
+  setTimeout(()=>preloadKetcherMolecule(field),500);
+}
+function closeKetcher(){const modal=document.getElementById('ketcher-modal'); modal?.classList.remove('show'); modal?.setAttribute('aria-hidden','true');}
+async function applyKetcherSmiles(){
+  const frame=document.getElementById('ketcher-frame');
+  if(!activeKetcherField||!frame){setKetcherStatus('No active SMILES field selected.');return;}
+  try{
+    setKetcherStatus('Reading SMILES from Ketcher...');
+    const api=await waitForKetcherApi(frame,30);
+    const smiles=String(await api.getSmiles()).trim();
+    if(!smiles){setKetcherStatus('No molecule found in Ketcher.');return;}
+    activeKetcherField.value=smiles;
+    activeKetcherField.dispatchEvent(new Event('input',{bubbles:true}));
+    activeKetcherField.dispatchEvent(new Event('change',{bubbles:true}));
+    closeKetcher();
+  }catch(err){setKetcherStatus(`Ketcher failed: ${String(err.message||err)}`);}
+}
+document.addEventListener('click',e=>{const btn=e.target.closest('[data-ketcher-field]'); if(btn) openKetcherFor(btn.dataset.ketcherField);});
+document.getElementById('ketcher-close')?.addEventListener('click',closeKetcher);
+document.getElementById('ketcher-apply')?.addEventListener('click',applyKetcherSmiles);
+document.getElementById('ketcher-modal')?.addEventListener('click',e=>{if(e.target.id==='ketcher-modal') closeKetcher();});
+
+</script>
+</body>
+</html>
