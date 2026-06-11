@@ -1,5 +1,7 @@
 import copy
+import json
 import os
+import re
 import tempfile
 import unittest
 
@@ -60,6 +62,7 @@ class BeAgentSafetyTests(unittest.TestCase):
         self.assertNotIn("solubility_mg_ml", patch["fields"])
         self.assertIn("particle_size_um", patch["fields"])
         self.assertLess(patch["fields"]["particle_size_um"], 42)
+        self.assertIsNone(re.search(r"[\uac00-\ud7a3]", json.dumps(patch, ensure_ascii=False)))
 
     def test_locked_api_fields_are_never_written(self):
         intent = _be_agent_keyword_intent(
