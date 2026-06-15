@@ -14,6 +14,7 @@ The application compares a reference product and a test product, predicts formul
 - SANOFI 10/10 demonstration dataset
 - Formulation optimization candidates and multi-round adjustment suggestions
 - Result-aware BE optimization Agent with constrained Test-side proposals and preview recalculation
+- Separate PK-Sim and GastroPlus result-import entrances with metric, curve, and BE-decision cross-validation
 - Seven-stage originator-development evidence package:
   - RLD/reference identity verification
   - Three or more commercial reference lots
