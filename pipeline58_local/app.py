@@ -4443,6 +4443,18 @@ def be_development_javascript() -> FileResponse:
     )
 
 
+@app.get("/static/be_cross_validation.js", response_class=FileResponse)
+def be_cross_validation_javascript() -> FileResponse:
+    asset_path = Path(__file__).resolve().parent / "static" / "be_cross_validation.js"
+    if not asset_path.exists():
+        raise HTTPException(status_code=404, detail="BE cross-validation asset not found")
+    return FileResponse(
+        asset_path,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard_home(
     request: Request,
@@ -5539,6 +5551,299 @@ def be_compare_run(
         return {"ok": True, "data": result, "error": None}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+def _be_cross_float(source: Dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        value = source.get(key)
+        if value in (None, "", "auto", "Auto", "AUTO"):
+            continue
+        try:
+            return float(value)
+        except Exception:
+            continue
+    return None
+
+
+def _be_cross_curve(value: Any) -> list[dict[str, float]]:
+    rows: list[dict[str, float]] = []
+    if not isinstance(value, list):
+        return rows
+    for row in value:
+        if not isinstance(row, dict):
+            continue
+        time_h = _be_cross_float(row, "time_h", "time", "hour", "hours", "x")
+        concentration = _be_cross_float(
+            row,
+            "conc_ng_ml",
+            "concentration",
+            "concentration_ng_ml",
+            "conc",
+            "value",
+            "y",
+        )
+        if time_h is None or concentration is None or time_h < 0 or concentration < 0:
+            continue
+        rows.append({"time_h": time_h, "conc_ng_ml": concentration})
+    deduplicated = {round(row["time_h"], 6): row for row in rows}
+    return [deduplicated[key] for key in sorted(deduplicated)]
+
+
+def _be_cross_curve_stats(internal_curve: Any, external_curve: Any) -> Dict[str, Any]:
+    internal = _be_cross_curve(internal_curve)
+    external = _be_cross_curve(external_curve)
+    if len(internal) < 3 or len(external) < 3:
+        return {"available": False, "pairs": 0, "rmse": None, "nrmse_pct": None, "correlation": None}
+
+    def interpolate(curve: list[dict[str, float]], time_h: float) -> float | None:
+        if time_h < curve[0]["time_h"] or time_h > curve[-1]["time_h"]:
+            return None
+        for left, right in zip(curve, curve[1:]):
+            if abs(time_h - left["time_h"]) < 1e-9:
+                return left["conc_ng_ml"]
+            if left["time_h"] <= time_h <= right["time_h"]:
+                width = right["time_h"] - left["time_h"]
+                if width <= 0:
+                    return left["conc_ng_ml"]
+                weight = (time_h - left["time_h"]) / width
+                return left["conc_ng_ml"] + weight * (right["conc_ng_ml"] - left["conc_ng_ml"])
+        if abs(time_h - curve[-1]["time_h"]) < 1e-9:
+            return curve[-1]["conc_ng_ml"]
+        return None
+
+    pairs = []
+    for row in internal:
+        external_value = interpolate(external, row["time_h"])
+        if external_value is not None:
+            pairs.append((row["conc_ng_ml"], external_value))
+    if len(pairs) < 3:
+        return {"available": False, "pairs": len(pairs), "rmse": None, "nrmse_pct": None, "correlation": None}
+
+    internal_values = [row[0] for row in pairs]
+    external_values = [row[1] for row in pairs]
+    rmse = math.sqrt(sum((left - right) ** 2 for left, right in pairs) / len(pairs))
+    mean_internal = sum(internal_values) / len(internal_values)
+    mean_external = sum(external_values) / len(external_values)
+    numerator = sum(
+        (left - mean_internal) * (right - mean_external)
+        for left, right in pairs
+    )
+    denominator = math.sqrt(
+        sum((value - mean_internal) ** 2 for value in internal_values)
+        * sum((value - mean_external) ** 2 for value in external_values)
+    )
+    correlation = numerator / denominator if denominator else None
+    return {
+        "available": True,
+        "pairs": len(pairs),
+        "rmse": round(rmse, 4),
+        "nrmse_pct": round(rmse / max(abs(mean_internal), 1e-9) * 100.0, 1),
+        "correlation": round(correlation, 4) if correlation is not None else None,
+    }
+
+
+def _be_cross_validation_compare(
+    tool: str,
+    current_result: Dict[str, Any],
+    current_request: Dict[str, Any],
+    external_result: Dict[str, Any],
+) -> Dict[str, Any]:
+    tool_key = str(tool or "").strip().lower()
+    tool_labels = {"pksim": "PK-Sim", "gastroplus": "GastroPlus"}
+    if tool_key not in tool_labels:
+        raise ValueError("tool must be pksim or gastroplus")
+    summary = current_result.get("summary") if isinstance(current_result.get("summary"), dict) else {}
+    common = current_request.get("common") if isinstance(current_request.get("common"), dict) else {}
+    external = external_result if isinstance(external_result, dict) else {}
+
+    current_metrics = {
+        "cmax_ratio": _be_cross_float(summary, "cmax_ratio"),
+        "auc_ratio": _be_cross_float(summary, "auc_ratio"),
+        "tmax_delta_h": _be_cross_float(summary, "tmax_delta_h"),
+    }
+    external_metrics = {
+        "cmax_ratio": _be_cross_float(external, "cmax_ratio", "cmax_tr", "cmax_t_r"),
+        "auc_ratio": _be_cross_float(external, "auc_ratio", "auc_tr", "auc_t_r"),
+        "tmax_delta_h": _be_cross_float(external, "tmax_delta_h", "tmax_delta"),
+    }
+    metric_specs = (
+        ("cmax_ratio", "Cmax T/R", 0.05, 0.10),
+        ("auc_ratio", "AUC T/R", 0.05, 0.10),
+        ("tmax_delta_h", "Tmax 差异", 1.0, 2.0),
+    )
+    metric_rows = []
+    for key, label, pass_limit, review_limit in metric_specs:
+        current_value = current_metrics[key]
+        external_value = external_metrics[key]
+        delta = external_value - current_value if current_value is not None and external_value is not None else None
+        absolute_delta = abs(delta) if delta is not None else None
+        state = (
+            "pass"
+            if absolute_delta is not None and absolute_delta <= pass_limit
+            else "review"
+            if absolute_delta is not None and absolute_delta <= review_limit
+            else "fail"
+            if absolute_delta is not None
+            else "missing"
+        )
+        metric_rows.append(
+            {
+                "key": key,
+                "label": label,
+                "current": current_value,
+                "external": external_value,
+                "delta": round(delta, 4) if delta is not None else None,
+                "state": state,
+                "unit": "h" if key == "tmax_delta_h" else "",
+            }
+        )
+
+    def bool_value(value: Any) -> bool | None:
+        if isinstance(value, bool):
+            return value
+        normalized = str(value or "").strip().lower()
+        if normalized in {"true", "1", "pass", "passed", "通过", "是", "yes"}:
+            return True
+        if normalized in {"false", "0", "fail", "failed", "未通过", "否", "no"}:
+            return False
+        return None
+
+    current_pass = bool_value(summary.get("be_pk_pass"))
+    external_pass = bool_value(external.get("be_pass"))
+    external_basis = "外部工具提供"
+    if external_pass is None:
+        cmax_low = _be_cross_float(external, "cmax_ci_low")
+        cmax_high = _be_cross_float(external, "cmax_ci_high")
+        auc_low = _be_cross_float(external, "auc_ci_low")
+        auc_high = _be_cross_float(external, "auc_ci_high")
+        if all(value is not None for value in (cmax_low, cmax_high, auc_low, auc_high)):
+            external_pass = bool(
+                cmax_low >= 0.8 and cmax_high <= 1.25 and auc_low >= 0.8 and auc_high <= 1.25
+            )
+            external_basis = "按外部 90% CI 推导"
+        elif external_metrics["cmax_ratio"] is not None and external_metrics["auc_ratio"] is not None:
+            external_pass = bool(
+                0.8 <= external_metrics["cmax_ratio"] <= 1.25
+                and 0.8 <= external_metrics["auc_ratio"] <= 1.25
+            )
+            external_basis = "仅按点估计 80%-125% 筛查"
+
+    internal_test_curve = (
+        current_result.get("test", {}).get("pbpk", {}).get("concentration_time_curve", [])
+        if isinstance(current_result.get("test"), dict)
+        else []
+    )
+    internal_reference_curve = (
+        current_result.get("reference", {}).get("pbpk", {}).get("concentration_time_curve", [])
+        if isinstance(current_result.get("reference"), dict)
+        else []
+    )
+    external_test_curve = external.get("test_curve", external.get("concentration_time_curve", []))
+    external_reference_curve = external.get("reference_curve", [])
+    test_curve_stats = _be_cross_curve_stats(internal_test_curve, external_test_curve)
+    reference_curve_stats = _be_cross_curve_stats(internal_reference_curve, external_reference_curve)
+
+    condition_warnings = []
+    blockers = []
+    current_dose = _be_cross_float(common, "dose_mg")
+    external_dose = _be_cross_float(external, "dose_mg")
+    if current_dose is not None and external_dose is not None:
+        if abs(external_dose - current_dose) / max(abs(current_dose), 1e-9) > 0.02:
+            blockers.append(f"剂量不一致：本系统 {current_dose:g} mg，{tool_labels[tool_key]} {external_dose:g} mg")
+    current_route = str(common.get("route") or "").strip().lower()
+    external_route = str(external.get("route") or "").strip().lower()
+    route_aliases = {"oral": "po", "口服": "po", "iv": "iv", "intravenous": "iv", "静脉": "iv"}
+    current_route = route_aliases.get(current_route, current_route)
+    external_route = route_aliases.get(external_route, external_route)
+    if current_route and external_route and current_route != external_route:
+        blockers.append(f"给药途径不一致：本系统 {current_route}，{tool_labels[tool_key]} {external_route}")
+    current_food = str(
+        current_request.get("development_evidence", {}).get("be_design", {}).get("food_state") or ""
+    ).strip().lower()
+    external_food = str(external.get("food_state") or "").strip().lower()
+    if current_food and external_food and current_food != external_food:
+        condition_warnings.append(f"进食条件不同：本系统 {current_food}，{tool_labels[tool_key]} {external_food}")
+
+    comparable_metrics = [row for row in metric_rows[:2] if row["state"] != "missing"]
+    if blockers:
+        status = "not_comparable"
+    elif len(comparable_metrics) < 2:
+        status = "not_comparable"
+        blockers.append("缺少 Cmax T/R 或 AUC T/R，无法形成完整比较")
+    elif current_pass is not None and external_pass is not None and current_pass != external_pass:
+        status = "conflict"
+    else:
+        metric_states = {row["state"] for row in comparable_metrics}
+        curve_good = (
+            not test_curve_stats["available"]
+            or (
+                test_curve_stats["nrmse_pct"] is not None
+                and test_curve_stats["nrmse_pct"] <= 20
+                and (
+                    test_curve_stats["correlation"] is None
+                    or test_curve_stats["correlation"] >= 0.9
+                )
+            )
+        )
+        status = "consistent" if metric_states == {"pass"} and curve_good else "partial"
+
+    status_meta = {
+        "consistent": ("一致", "关键指标与结论接近，可作为相互支持的证据。"),
+        "partial": ("部分一致", "总体方向相同，但部分数值或曲线仍有明显差异。"),
+        "conflict": ("结论冲突", "BE 通过/失败结论不一致，需要核对模型条件与输入。"),
+        "not_comparable": ("不可比较", "关键条件或必要指标不足，当前不能直接比较。"),
+    }
+    label, message = status_meta[status]
+    return {
+        "tool": tool_key,
+        "tool_label": tool_labels[tool_key],
+        "status": status,
+        "status_label": label,
+        "message": message,
+        "metrics": metric_rows,
+        "current_be_pass": current_pass,
+        "external_be_pass": external_pass,
+        "external_decision_basis": external_basis,
+        "test_curve_stats": test_curve_stats,
+        "reference_curve_stats": reference_curve_stats,
+        "curves": {
+            "internal_test": _be_cross_curve(internal_test_curve),
+            "external_test": _be_cross_curve(external_test_curve),
+            "internal_reference": _be_cross_curve(internal_reference_curve),
+            "external_reference": _be_cross_curve(external_reference_curve),
+        },
+        "condition_warnings": condition_warnings,
+        "blockers": blockers,
+        "external_metadata": {
+            "version": str(external.get("version") or ""),
+            "project_name": str(external.get("project_name") or ""),
+            "source_file": str(external.get("source_file") or ""),
+        },
+    }
+
+
+@app.post("/api/v1/be/cross-validation/compare")
+def be_cross_validation_compare(
+    payload: Dict[str, Any],
+    user: Dict[str, Any] = Depends(_require_role("analyst")),
+) -> Dict[str, Any]:
+    try:
+        current_result = payload.get("current_result") if isinstance(payload.get("current_result"), dict) else {}
+        current_request = payload.get("current_request") if isinstance(payload.get("current_request"), dict) else {}
+        external_result = payload.get("external_result") if isinstance(payload.get("external_result"), dict) else {}
+        if not current_result.get("summary"):
+            raise ValueError("Run BE first, then import an external tool result.")
+        comparison = _be_cross_validation_compare(
+            str(payload.get("tool") or ""),
+            current_result,
+            current_request,
+            external_result,
+        )
+        return {"ok": True, "data": comparison, "error": None}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Cross-validation failed: {exc}")
 
 
 BE_AGENT_GOALS = {
